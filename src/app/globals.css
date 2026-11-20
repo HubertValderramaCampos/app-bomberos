@@ -1,26 +1,165 @@
 @import "tailwindcss";
 
+@theme {
+  --color-bg: #0b0d11;
+  --color-surface: #13161c;
+  --color-surface-2: #1a1e26;
+  --color-surface-3: #232833;
+  --color-line: #262c37;
+  --color-line-strong: #353d4b;
+  --color-text: #f1f3f6;
+  --color-muted: #9aa3b2;
+  --color-dim: #6b7383;
+  --color-accent: #e8322b;
+  --color-accent-strong: #ff4a3d;
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+
+  --color-cat-incendio: #ef4444;
+  --color-cat-medica: #3b82f6;
+  --color-cat-rescate: #eab308;
+  --color-cat-vehicular: #f97316;
+  --color-cat-matpel: #a855f7;
+  --color-cat-servicio: #22d3ee;
+  --color-cat-otro: #94a3b8;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-jb), ui-monospace, monospace;
+
+  --animate-ping-slow: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --nav-h: 64px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+
+.font-display {
+  letter-spacing: 0.01em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Barras de "hablando" en la radio */
+@keyframes vu {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+.vu-bar {
+  transform-origin: bottom;
+  animation: vu 0.9s ease-in-out infinite;
+}
+
+@keyframes entrar {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.animar-entrada {
+  animation: entrar 0.25s ease-out;
+}
+
+@keyframes destello {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: color-mix(in oklab, var(--color-accent) 14%, transparent); }
+}
+.destello {
+  animation: destello 1.4s ease-in-out 3;
+}
+
+/* ── Leaflet en tema oscuro ───────────────────────────────────────────── */
+.leaflet-container {
+  background: #0e1116;
+  font-family: var(--font-sans);
+}
+/* Teselas OSM oscurecidas (tema nocturno sin depender de un proveedor con API key) */
+.mapa-oscuro {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.5);
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-line-strong);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+.leaflet-popup-content {
+  margin: 10px 12px;
+}
+.leaflet-container a.leaflet-popup-close-button {
+  color: var(--color-muted);
+}
+.leaflet-control-attribution {
+  background: rgb(11 13 17 / 0.75) !important;
+  color: var(--color-dim) !important;
+  font-size: 10px;
+}
+.leaflet-control-attribution a {
+  color: var(--color-muted) !important;
+}
+.leaflet-bar a {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border-color: var(--color-line-strong);
+}
+.leaflet-bar a:hover {
+  background: var(--color-surface-3);
+}
+
+.marcador-emergencia {
+  position: relative;
+}
+.marcador-emergencia .anillo {
+  position: absolute;
+  inset: -7px;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.marcador-emergencia .punto {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: currentColor;
+  border: 2px solid #0b0d11;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.25);
+}
+.marcador-yo {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #60a5fa;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 6px rgb(96 165 250 / 0.25);
 }

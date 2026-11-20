@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# datos locales (suscripciones push, caché de briefings)
+/data
+/.next-test/

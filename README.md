@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Alerta 116 — Operaciones bomberiles
 
-## Getting Started
+App web instalable (PWA) para bomberos voluntarios del Perú: emergencias en tiempo real, radio en vivo,
+alertas push cercanas y por compañía, briefing operativo e identificación de materiales peligrosos con IA.
 
-First, run the development server:
+> App independiente; **no es un canal oficial del CGBVP**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Módulos
+
+| Pantalla | Qué hace |
+| --- | --- |
+| **En vivo** (`/`) | Emergencias del SGO (24 h) en lista + mapa, filtros por tipo, búsqueda, orden por cercanía, resumen de situación |
+| **Detalle** (`/emergencia/[parte]`) | Cronómetro, ruta Google Maps/Waze, unidades, compartir, **lo dicho por radio (resumen + cronología)** y briefing con IA |
+| **Radio** (`/radio`) | Canales de la Central (IV CDLC), indicador de transmisión, selectivas, **transcripción en vivo del Canal 2**; sigue sonando al navegar y en segundo plano |
+| **MatPel** (`/matpel`) | Identificación por N° ONU, nombre o foto; guía GRE, NFPA, EPP, aislamiento. Tabla local sin conexión |
+| **Alertas** (`/alertas`) | Push con la app cerrada: emergencias en tu radio y despachos/selectivas de tu compañía |
+
+## Arquitectura
+
+```
+SGO CGBVP (público) ──► Monitor (servidor, 1 consulta/min) ──► SSE /api/stream ──► todos los clientes
+                                   │
+                                   ├─► Web Push (VAPID) a suscriptores en el radio o de la compañía
+                                   └─► OpenAI (briefing, situación, MatPel) — con respaldo local si falla
+Radio Icecast (radio.lenznetwork.com) ──► navegador directo (CORS abierto)
+            └─► Transcriptor (servidor): Canal 2 + feed /actividad ──► Whisper ──► vínculo con la emergencia ──► SSE
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Transcripción de la radio (Whisper)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `src/lib/server/radio/transcriptor.ts`: el servidor escucha el Canal 2 (Central) 24/7. El feed `/actividad` del receptor
+  indica cuándo hay portadora; solo se recortan y transcriben esas transmisiones (no se paga por silencio). El audio llega
+  ~0,5 s después de la marca de actividad (medido). Intercambios con huecos ≤ 3 s se agrupan.
+- Filtros anti-alucinación: confianza de cada fragmento de Whisper (`no_speech_prob`, `avg_logprob`), frases típicas
+  ("subtítulos…") y eco del prompt.
+- Vínculo con la emergencia: primero por código de unidad ("Ambulancia 138-2" ↔ `AMB138-2` del SGO); si no hay código,
+  la IA lo intenta con dirección, distrito y contexto (y reintenta cuando aparece una emergencia nueva en el SGO).
+- Costo: whisper-1 ≈ US$0,006 por minuto de audio. En las pruebas el Canal 2 tuvo voz ~20 % del tiempo ≈ US$1,6/día.
+  Tope diario configurable (`RADIO_MAX_MIN_DIA`, por defecto 480 min ≈ US$2,9/día).
+- Las transcripciones pueden contener direcciones y datos de personas: se guardan solo 24 h.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/lib/server/monitor.ts`: sondeo único del SGO, detección de nuevas/actualizadas, *backoff* ante fallos o bloqueo.
+- `src/lib/server/sgo.ts`: parser del SGO (coordenadas, distrito, unidades, compañías).
+- `src/lib/server/ia.ts`: OpenAI con salidas estructuradas; si no hay saldo, se pausa 10 min y usa guías locales.
+- `src/lib/server/push.ts`: suscripciones y envío push.
+- `src/lib/matpel-ref.ts`: referencia rápida ONU → guía GRE (contrasta la respuesta de la IA).
+- Datos persistentes en `data/*.json` (suscripciones, caché de briefings). Para varios servidores, migrar a Postgres.
 
-## Learn More
+## Configuración (`.env.local`)
 
-To learn more about Next.js, take a look at the following resources:
+```
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL_RAPIDO=gpt-5.4-mini     # briefing y situación
+OPENAI_MODEL_EXPERTO=gpt-5.4-mini    # MatPel (visión); gpt-5.4 es más lento (~20 s)
+# OPENAI_ESFUERZO_MATPEL=low        # none | low | medium
+VAPID_PUBLIC_KEY=...                 # npx web-push generate-vapid-keys
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:tu-correo@dominio.pe
+SGO_POLL_MS=60000                    # mínimo 30000
+# MONITOR_DESACTIVADO=1              # no consultar el SGO (desarrollo de UI)
+# RADIO_TRANSCRIPCION=0              # desactiva la transcripción de la radio
+# RADIO_MODELO_TRANSCRIPCION=whisper-1
+# RADIO_MAX_MIN_DIA=480              # tope diario de minutos transcritos
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Ejecutar
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+npm run build
+npm run start          # http://localhost:3000
+```
 
-## Deploy on Vercel
+Requiere un servidor Node de larga duración (el monitor corre en segundo plano): VPS, Docker, Railway, etc.
+No funciona en plataformas *serverless*. Las notificaciones push exigen **HTTPS** en producción.
+En iPhone, las push funcionan solo con la app instalada en la pantalla de inicio (iOS 16.4+).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Importante antes de publicar
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **SGO**: el portal bloquea IPs que consultan con frecuencia (redirige a `/Home/Forbidden` con reCAPTCHA).
+  El servidor hace **una** consulta por minuto para todos los usuarios y espera más tras un bloqueo.
+  Lo recomendable es coordinar con el CGBVP un acceso autorizado. No intentes evadir el bloqueo.
+- **Radio**: los streams pertenecen a la IV CDLC / Lenz Network; pedir autorización para usarlos en la app.
+- **IA**: es orientativa; prevalecen la GRE, la HDS y las órdenes del oficial al mando.
