@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Emergencia, Snapshot } from "@/lib/types";
-import { obtenerEmergencias, SgoBloqueado } from "./sgo";
+import { obtenerEmergencias, pausarSgo, SgoBloqueado } from "./sgo";
 import { notificarEmergencia } from "./push";
 
 /** Una sola consulta por intervalo para TODOS los usuarios: no se debe saturar el portal del CGBVP. */
@@ -130,6 +130,7 @@ class Monitor extends EventEmitter {
       const base = bloqueado ? 10 * 60_000 : POLL_MS;
       const espera = Math.min(ESPERA_MAX_MS, base * 2 ** Math.min(this.fallosSeguidos - 1, 5));
       this.esperarHasta = Date.now() + espera;
+      if (bloqueado) pausarSgo(this.esperarHasta);
       this.error = `${(err as Error).message}. Reintento en ${Math.round(espera / 60_000) || 1} min.`;
       console.error("[monitor] error consultando SGO:", this.error);
       this.emitir({ tipo: "estado", data: { actualizado: this.actualizado, ok: false, error: this.error } });

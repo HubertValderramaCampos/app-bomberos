@@ -1,4 +1,4 @@
-import type { Emergencia, ResumenRadio, Transmision } from "@/lib/types";
+import type { Emergencia, ResumenRadio, SelectivaInfo, Transmision } from "@/lib/types";
 import { horaLima } from "@/lib/tiempo";
 import { completarJSON, CONTEXTO, MODELO_RAPIDO } from "../ia";
 import { glosarioClaves } from "@/lib/claves";
@@ -104,9 +104,19 @@ const SCHEMA_RESUMEN = {
 
 const cacheResumen = new Map<string, { clave: string; t: number; data: ResumenRadio }>();
 
-export async function resumirRadio(e: Emergencia, txs: Transmision[]): Promise<ResumenRadio | null> {
+export async function resumirRadio(e: Emergencia, txs: Transmision[], selectivas: SelectivaInfo[] = []): Promise<ResumenRadio | null> {
   if (!txs.length) return null;
-  const clave = txs.map((t) => t.id).join(",");
+  const clave = [...txs.map((t) => t.id), ...selectivas.map((s) => s.epoch)].join(",");
+  // Selectivas y transmisiones intercaladas en orden cronológico
+  const lineas = [
+    ...selectivas.map((s) => ({
+      t: s.epoch * 1000,
+      l: `[${hms(new Date(s.epoch * 1000).toISOString())}] SELECTIVA: la Central llama por tono a ${s.cia}${s.origen === "inferida" ? " (probable)" : ""}`,
+    })),
+    ...txs.map((t) => ({ t: Date.parse(t.ini), l: `[${hms(t.ini)}] "${t.texto}"` })),
+  ]
+    .sort((a, b) => a.t - b.t)
+    .map((x) => x.l);
   const c = cacheResumen.get(e.parte);
   if (c && (c.clave === clave || Date.now() - c.t < 20_000)) return c.data;
 
@@ -120,9 +130,7 @@ Resumes lo comunicado por la radio de la Central sobre UNA emergencia. Las trans
 tener errores en números y nombres: no inventes lo que no se dijo y marca como "(no confirmado)" lo dudoso.
 Interpreta las claves con el glosario; si un número no está en el glosario o no encaja, no lo interpretes.
 ${CLAVES_RADIO}`,
-    usuario: `EMERGENCIA (SGO): ${lineaEmergencia(e)}\n\nTRANSMISIONES (hora de Lima):\n${txs
-      .map((t) => `[${hms(t.ini)}] "${t.texto}"`)
-      .join("\n")}`,
+    usuario: `EMERGENCIA (SGO): ${lineaEmergencia(e)}\n\nRADIO (hora de Lima):\n${lineas.join("\n")}`,
   });
   const data: ResumenRadio = { ...r, transmisiones: txs.length, generado: new Date().toISOString() };
   cacheResumen.set(e.parte, { clave, t: Date.now(), data });

@@ -10,7 +10,8 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/emergencias/[pa
   const m = getMonitor();
   await m.esperarListo();
   const emergencia = m.obtener(parte);
-  const unidades = await obtenerResumenUnidades(parte);
+  // Solo se consulta GetResume si la emergencia existe (evita pedir partes inválidos al SGO)
+  const unidades = emergencia ? await obtenerResumenUnidades(parte, emergencia.maquinas) : [];
   if (!emergencia) {
     return Response.json(
       { error: "La emergencia ya no figura en el SGO (más de 24 h) o el número es incorrecto.", unidades },

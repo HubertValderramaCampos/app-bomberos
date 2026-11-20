@@ -39,6 +39,17 @@ Radio Icecast (radio.lenznetwork.com) ──► navegador directo (CORS abierto)
   Tope diario configurable (`RADIO_MAX_MIN_DIA`, por defecto 480 min ≈ US$2,9/día).
 - Las transcripciones pueden contener direcciones y datos de personas: se guardan solo 24 h.
 
+### Selectivas por estación
+
+- `src/lib/server/radio/selectivas.ts`: guarda el historial de selectivas del Canal 2 (el JSON de origen solo trae ~60)
+  e identifica la estación de cada par de tonos. Pares confirmados en `src/lib/estaciones.ts` (`PARES_CONFIRMADOS`)
+  junto con las 14 estaciones de la IV CDLC.
+- Pares desconocidos: se aprenden cruzando cada selectiva con los partes del SGO y las transmisiones de los minutos
+  siguientes. La Central llama a varias compañías seguidas para una misma emergencia y las estaciones muy activas
+  aparecen cerca de casi todo, así que se exige ≥ 3 coincidencias, ≥ 60 % de las apariciones y lift ≥ 2 respecto
+  de la tasa base, con asignación uno a uno. Validado a ciegas con los pares conocidos: sin falsos positivos.
+- Push «la Central llama a tu compañía» con la app cerrada (si la estación está en la IV CDLC).
+
 - `src/lib/server/monitor.ts`: sondeo único del SGO, detección de nuevas/actualizadas, *backoff* ante fallos o bloqueo.
 - `src/lib/server/sgo.ts`: parser del SGO (coordenadas, distrito, unidades, compañías).
 - `src/lib/server/ia.ts`: OpenAI con salidas estructuradas; si no hay saldo, se pausa 10 min y usa guías locales.
@@ -78,7 +89,10 @@ En iPhone, las push funcionan solo con la app instalada en la pantalla de inicio
 ## Importante antes de publicar
 
 - **SGO**: el portal bloquea IPs que consultan con frecuencia (redirige a `/Home/Forbidden` con reCAPTCHA).
-  El servidor hace **una** consulta por minuto para todos los usuarios y espera más tras un bloqueo.
+  El servidor hace **una** consulta por minuto para todos los usuarios y espera más tras un bloqueo
+  (`GetResume` solo al abrir un detalle, con caché de 10 min). **No corras dos servidores a la vez desde
+  la misma IP** (p. ej. `npm run dev` y `npm run start`): cada uno sondea por su cuenta y suman consultas.
+  En desarrollo de interfaz usa `MONITOR_DESACTIVADO=1`. El bloqueo observado duró ~2 h.
   Lo recomendable es coordinar con el CGBVP un acceso autorizado. No intentes evadir el bloqueo.
 - **Radio**: los streams pertenecen a la IV CDLC / Lenz Network; pedir autorización para usarlos en la app.
 - **IA**: es orientativa; prevalecen la GRE, la HDS y las órdenes del oficial al mando.

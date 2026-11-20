@@ -1,6 +1,7 @@
 import { getMonitor, type EventoMonitor } from "@/lib/server/monitor";
 import { getTranscriptor } from "@/lib/server/radio/transcriptor";
-import type { Transmision } from "@/lib/types";
+import { getSelectivas } from "@/lib/server/radio/selectivas";
+import type { SelectivaInfo, Transmision } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,9 @@ export async function GET(req: Request) {
       const onTransmision = (tx: Transmision) => enviar("transmision", tx);
       const radio = getTranscriptor();
       radio.on("transmision", onTransmision);
+      const onSelectiva = (s: SelectivaInfo) => enviar("selectiva", s);
+      const selectivas = getSelectivas();
+      selectivas.on("selectiva", onSelectiva);
       const latido = setInterval(() => {
         if (cerrado) return;
         try {
@@ -49,6 +53,7 @@ export async function GET(req: Request) {
         clearInterval(latido);
         m.off("evento", onEvento);
         radio.off("transmision", onTransmision);
+        selectivas.off("selectiva", onSelectiva);
         try {
           controller.close();
         } catch {

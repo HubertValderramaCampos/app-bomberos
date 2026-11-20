@@ -118,6 +118,38 @@ export interface Transmision {
   vinculo: "codigo" | "ia" | null;
 }
 
+/** Selectiva (par de tonos Quick Call II con que la Central llama a una compañía). */
+export interface SelectivaInfo {
+  epoch: number;
+  ts: string;
+  /** Par de tonos, p. ej. "2-16/2-15" */
+  par: string;
+  /** Frecuencias en Hz */
+  a: number;
+  b: number;
+  /** Compañía identificada, p. ej. "B-10" */
+  cia: string | null;
+  /** confirmada = par conocido con certeza; inferida = aprendida por correlación (con confianza 0–1) */
+  origen: "confirmada" | "inferida" | null;
+  confianza: number | null;
+  nombre: string | null;
+  distrito: string | null;
+  /** Emergencia a la que probablemente corresponde (por compañía y hora) */
+  parte: string | null;
+}
+
+/** Estado del aprendizaje de un par de tonos. */
+export interface ParTonos {
+  par: string;
+  cia: string | null;
+  origen: "confirmada" | "inferida" | null;
+  confianza: number | null;
+  /** Veces que se escuchó */
+  veces: number;
+  /** Votos acumulados por compañía (evidencia de correlación) */
+  votos: Record<string, number>;
+}
+
 export interface ResumenRadio {
   resumen: string;
   estado_actual: string;

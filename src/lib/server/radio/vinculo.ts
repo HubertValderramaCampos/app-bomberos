@@ -5,7 +5,8 @@ export const canon = (codigo: string) => codigo.toUpperCase().replace(/[^A-Z0-9]
 
 const PALABRAS: [RegExp, string][] = [
   [/\bRESCATE LIGERO\b/g, "RESLIG"],
-  [/\bMAQUINA\b/g, "M"],
+  // Whisper a veces escribe "Maquinado", "Maquinas": cualquier palabra que empiece con MAQUIN
+  [/\bMAQUIN[A-Z]*\b/g, "M"],
   [/\bAMBULANCIA\b/g, "AMB"],
   [/\bRESCATE\b/g, "RES"],
   [/\bCISTERNA\b/g, "CIST"],

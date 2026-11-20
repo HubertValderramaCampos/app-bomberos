@@ -1,11 +1,10 @@
 import crypto from "node:crypto";
 import { sendNotification, setVapidDetails } from "web-push";
-import type { Emergencia, PrefsAlertas } from "@/lib/types";
+import type { Emergencia, PrefsAlertas, SelectivaInfo } from "@/lib/types";
 import { CATEGORIAS } from "@/lib/categorias";
 import { distanciaKm, formatoDistancia } from "@/lib/geo";
 import { guardar, leer } from "./store";
 import { obtenerBriefing } from "./ia";
-import { obtenerResumenUnidades } from "./sgo";
 
 export interface Suscripcion {
   id: string;
@@ -145,9 +144,9 @@ export async function notificarEmergencia(e: Emergencia, maquinasNuevas?: string
   }
   if (destinos.length === 0) return;
 
-  const unidades = await obtenerResumenUnidades(e.parte).catch(() => []);
+  // Sin consulta extra al SGO: el resumen se arma con los datos que ya trajo el sondeo
   const briefing = await Promise.race([
-    obtenerBriefing(e, unidades),
+    obtenerBriefing(e),
     new Promise<null>((r) => setTimeout(() => r(null), 12_000)),
   ]).catch(() => null);
 
@@ -181,4 +180,25 @@ export async function notificarEmergencia(e: Emergencia, maquinasNuevas?: string
     }),
   );
   console.log(`[push] parte ${e.parte}: ${destinos.length} notificación(es)`);
+}
+
+/** La Central llamó por selectiva a una compañía: aviso a quienes la tienen como "mi compañía". */
+export async function notificarSelectiva(sel: SelectivaInfo) {
+  if (!configurarVapid() || !sel.cia) return;
+  const hora = new Date(sel.epoch * 1000).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hour12: false });
+  const destinos = Object.values(leer<Mapa>("suscripciones", {})).filter((s) => s.prefs.compania && `B-${s.prefs.compania}` === sel.cia);
+  if (!destinos.length) return;
+  const probable = sel.origen === "inferida" ? ` (probable, ${Math.round((sel.confianza ?? 0) * 100)} %)` : "";
+  await Promise.all(
+    destinos.map((sub) =>
+      enviar(sub, {
+        title: `Selectiva: la Central llama a ${sel.cia}${probable}`,
+        body: `Canal 2 · ${hora}${sel.nombre ? ` · ${sel.nombre}` : ""}. Escucha la radio para el despacho.`,
+        url: sel.parte ? `/emergencia/${sel.parte}` : "/radio",
+        tag: `sel-${sel.epoch}`,
+        urgente: true,
+      }),
+    ),
+  );
+  console.log(`[push] selectiva ${sel.cia}: ${destinos.length} notificación(es)`);
 }

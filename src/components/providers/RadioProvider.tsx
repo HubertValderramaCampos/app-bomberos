@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useLive } from "./LiveProvider";
 import { tonoAlerta, vibrar } from "@/lib/cliente/sonido";
 import { crearAlmacenLocal } from "@/lib/cliente/almacen";
+import type { ParTonos, SelectivaInfo } from "@/lib/types";
 
 /**
  * Radio de la Central de Emergencias — IV Comandancia Departamental Lima Centro.
@@ -30,12 +31,6 @@ export const CANALES: Canal[] = [
   { id: "c4", nombre: "Canal 4", corto: "C4", mount: "/sdr-canal4.mp3", frec: "160.575 MHz", sdr: "C-4", descripcion: "Operaciones" },
 ];
 
-export interface Selectiva {
-  epoch: number;
-  ts: string;
-  cia: string | null;
-  confirmada: boolean;
-}
 
 interface RadioCtx {
   canal: Canal;
@@ -51,7 +46,10 @@ interface RadioCtx {
   actividad: Record<string, boolean>;
   /** Mounts en línea y oyentes, según status-json de Icecast */
   servidor: { ok: boolean; mounts: Record<string, number> } | null;
-  selectivas: Selectiva[];
+  /** Selectivas recientes identificadas por estación (servidor) */
+  selectivas: SelectivaInfo[];
+  /** Estado del aprendizaje de cada par de tonos */
+  pares: ParTonos[];
   /** Activa el sondeo de estado/actividad aunque no se esté reproduciendo (pantalla de radio abierta) */
   setObservando: (v: boolean) => void;
 }
@@ -71,7 +69,8 @@ export function RadioProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [actividad, setActividad] = useState<Record<string, boolean>>({});
   const [servidor, setServidor] = useState<RadioCtx["servidor"]>(null);
-  const [selectivas, setSelectivas] = useState<Selectiva[]>([]);
+  const [selectivas, setSelectivas] = useState<SelectivaInfo[]>([]);
+  const [pares, setPares] = useState<ParTonos[]>([]);
   const [observando, setObservando] = useState(false);
   const intentos = useRef(0);
   /** Copia síncrona de "quiere": los eventos del <audio> llegan antes del re-render */
@@ -270,14 +269,13 @@ export function RadioProvider({ children }: { children: React.ReactNode }) {
     };
     const sel = async () => {
       try {
-        const r = await fetch(`${RADIO_BASE}/selectivas.json`, { cache: "no-store" });
-        const j = (await r.json()) as { selectivas?: { epoch: number; ts: string; cia: string | null; cia_origen: string | null }[] };
-        const lista = (j.selectivas ?? [])
-          .slice(-25)
-          .reverse()
-          .map((s) => ({ epoch: s.epoch, ts: s.ts, cia: s.cia, confirmada: s.cia_origen === "confirmado" }));
+        // Nuestro servidor guarda el historial e identifica la estación de cada par de tonos
+        const r = await fetch("/api/radio/selectivas", { cache: "no-store" });
+        const j = (await r.json()) as { selectivas: SelectivaInfo[]; pares: ParTonos[] };
+        const lista = j.selectivas ?? [];
         if (!vivo) return;
         setSelectivas(lista);
+        setPares(j.pares ?? []);
         const ult = lista[0];
         if (!ult) return;
         if (ultimaSel.current === null) {
@@ -288,7 +286,13 @@ export function RadioProvider({ children }: { children: React.ReactNode }) {
           ultimaSel.current = ult.epoch;
           const mia = prefsRef.current.compania;
           if (mia && ult.cia === `B-${mia}` && Date.now() / 1000 - ult.epoch < 120) {
-            avisar({ titulo: `Selectiva: la Central llama a B-${mia}`, cuerpo: "Canal 2 · Central de Emergencias", href: "/radio", color: "#e8322b", urgente: true });
+            avisar({
+              titulo: `Selectiva: la Central llama a B-${mia}${ult.origen === "inferida" ? " (probable)" : ""}`,
+              cuerpo: `Canal 2 · Central de Emergencias${ult.nombre ? ` · ${ult.nombre}` : ""}`,
+              href: ult.parte ? `/emergencia/${ult.parte}` : "/radio",
+              color: "#e8322b",
+              urgente: true,
+            });
             if (prefsRef.current.sonido) tonoAlerta(true);
             if (prefsRef.current.vibracion) vibrar(true);
           }
@@ -322,9 +326,10 @@ export function RadioProvider({ children }: { children: React.ReactNode }) {
       actividad,
       servidor,
       selectivas,
+      pares,
       setObservando,
     }),
-    [canal, setCanal, reproduciendo, cargando, error, alternar, detener, volumen, setVolumenState, actividad, servidor, selectivas],
+    [canal, setCanal, reproduciendo, cargando, error, alternar, detener, volumen, setVolumenState, actividad, servidor, selectivas, pares],
   );
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;

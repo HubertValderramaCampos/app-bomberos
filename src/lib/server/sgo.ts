@@ -126,17 +126,35 @@ export async function obtenerEmergencias() {
   return lista;
 }
 
-const cacheResumen = new Map<string, { t: number; data: UnidadResumen[] }>();
+/**
+ * Mientras el SGO nos tenga limitados (lo fija el monitor), no se hace NINGUNA consulta extra:
+ * seguir consultando durante el bloqueo lo prolonga.
+ */
+let pausaHasta = 0;
+export function pausarSgo(hastaMs: number) {
+  pausaHasta = hastaMs;
+}
 
-/** Resumen de unidades por tipo (endpoint público Home/GetResume). */
-export async function obtenerResumenUnidades(parte: string): Promise<UnidadResumen[]> {
+const cacheResumen = new Map<string, { t: number; clave: string; data: UnidadResumen[] }>();
+
+/**
+ * Resumen de unidades por tipo (endpoint público Home/GetResume). Solo se pide al abrir el
+ * detalle de una emergencia; se cachea 10 min o hasta que cambien las unidades despachadas.
+ */
+export async function obtenerResumenUnidades(parte: string, maquinas: string[] = []): Promise<UnidadResumen[]> {
+  const clave = maquinas.join(",");
   const c = cacheResumen.get(parte);
-  if (c && Date.now() - c.t < 60_000) return c.data;
+  if (c && c.clave === clave && Date.now() - c.t < 10 * 60_000) return c.data;
+  if (Date.now() < pausaHasta) return c?.data ?? [];
   try {
     const res = await fetch(
       `${SGO_BASE}/Home/GetResume?numeroparte=${encodeURIComponent(parte)}`,
       { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8_000), cache: "no-store" },
     );
+    if (res.url.includes("/Forbidden")) {
+      pausarSgo(Date.now() + 10 * 60_000);
+      return c?.data ?? [];
+    }
     if (!res.ok) return c?.data ?? [];
     const json = (await res.json()) as { Codigo: string; TipoVehiculo: string; Cantidad: number }[];
     const data = (Array.isArray(json) ? json : []).map((u) => ({
@@ -144,7 +162,7 @@ export async function obtenerResumenUnidades(parte: string): Promise<UnidadResum
       tipo: String(u.TipoVehiculo ?? "").trim(),
       cantidad: Number(u.Cantidad ?? 0),
     }));
-    cacheResumen.set(parte, { t: Date.now(), data });
+    cacheResumen.set(parte, { t: Date.now(), clave, data });
     if (cacheResumen.size > 500) cacheResumen.delete(cacheResumen.keys().next().value!);
     return data;
   } catch {

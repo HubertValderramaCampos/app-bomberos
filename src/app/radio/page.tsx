@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AudioLines, Headphones, LoaderCircle, Megaphone, Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { ListaTransmisiones } from "@/components/ListaTransmisiones";
 import { ReferenciaClaves } from "@/components/ReferenciaClaves";
+import { TablaEstaciones } from "@/components/TablaEstaciones";
 import { CANALES, hablando, useRadio } from "@/components/providers/RadioProvider";
 import { useAhora, useLive } from "@/components/providers/LiveProvider";
 import { BarrasVoz } from "@/components/BarrasVoz";
@@ -157,23 +158,42 @@ export default function RadioPage() {
             {r.selectivas.map((s) => {
               const mia = miCia && s.cia === miCia;
               return (
-                <li key={s.epoch} className={`flex items-center gap-3 px-4 py-2.5 ${mia ? "bg-accent/10" : ""}`}>
-                  <span className="w-12 font-mono text-sm tabular text-muted">{horaLima(new Date(s.epoch * 1000).toISOString())}</span>
-                  <span className={`font-display text-lg font-bold uppercase ${s.cia ? (mia ? "text-accent-strong" : "") : "text-dim"}`}>
-                    {s.cia ?? "No identificada"}
+                <li key={`${s.epoch}-${s.par}`} className={`flex items-center gap-3 px-4 py-2.5 ${mia ? "bg-accent/10" : ""}`}>
+                  <span className="w-12 shrink-0 font-mono text-sm tabular text-muted">{horaLima(new Date(s.epoch * 1000).toISOString())}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className={`font-display text-lg font-bold uppercase leading-none ${s.cia ? (mia ? "text-accent-strong" : "") : "text-dim"}`}>
+                        {s.cia ?? "No identificada"}
+                      </span>
+                      {s.origen === "inferida" && (
+                        <span className="rounded-full bg-warn/15 px-1.5 py-px text-[10px] font-bold uppercase text-warn" title="Aprendida por correlación con partes y radio">
+                          probable {s.confianza != null ? `${Math.round(s.confianza * 100)} %` : ""}
+                        </span>
+                      )}
+                      {s.parte && (
+                        <Link href={`/emergencia/${s.parte}`} className="rounded-full border border-line-strong px-1.5 py-px text-[10px] font-semibold text-muted hover:border-accent">
+                          ver emergencia
+                        </Link>
+                      )}
+                    </span>
+                    <span className="block truncate text-xs text-muted">
+                      {s.nombre ? `${s.nombre} · ${s.distrito}` : <span className="font-mono text-dim">tonos {s.par}</span>}
+                    </span>
                   </span>
-                  {s.cia && !s.confirmada && <span className="text-[10px] uppercase text-dim">probable</span>}
-                  <span className="ml-auto text-xs text-dim">{hace(new Date(s.epoch * 1000).toISOString(), ahora)}</span>
+                  <span className="shrink-0 text-xs text-dim">{hace(new Date(s.epoch * 1000).toISOString(), ahora)}</span>
                 </li>
               );
             })}
           </ul>
         )}
         <p className="border-t border-line px-4 py-2.5 text-[11px] leading-relaxed text-dim">
-          La selectiva es el tono con el que la Central llama a una compañía. Configura tu compañía en{" "}
+          La selectiva es el par de tonos con el que la Central llama a una estación. Los pares desconocidos se aprenden solos
+          cruzándolos con los partes del SGO y las transmisiones. Configura tu compañía en{" "}
           <Link href="/alertas" className="text-muted underline">Alertas</Link> para recibir un aviso cuando la llamen.
         </p>
       </section>
+
+      <TablaEstaciones pares={r.pares} />
 
       <ReferenciaClaves />
 

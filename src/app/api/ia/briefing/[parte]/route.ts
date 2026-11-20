@@ -1,5 +1,4 @@
 import { getMonitor } from "@/lib/server/monitor";
-import { obtenerResumenUnidades } from "@/lib/server/sgo";
 import { briefingEnCache, obtenerBriefing } from "@/lib/server/ia";
 import { ipDe, permitir } from "@/lib/server/ratelimit";
 
@@ -19,7 +18,7 @@ export async function GET(req: Request, ctx: RouteContext<"/api/ia/briefing/[par
   if (!briefingEnCache(parte) && !permitir(`briefing:${ipDe(req)}`, 30, 10 * 60_000)) {
     return Response.json({ error: "Demasiadas solicitudes, intenta en unos minutos." }, { status: 429 });
   }
-  const unidades = await obtenerResumenUnidades(parte);
-  const b = await obtenerBriefing(e, unidades);
+  // Sin consulta extra al SGO: el briefing trabaja con los códigos de unidad que ya tenemos
+  const b = await obtenerBriefing(e);
   return Response.json(b, { headers: { "Cache-Control": "no-store" } });
 }

@@ -8,4 +8,9 @@ export async function register() {
   // Transcripción de la radio de la Central (Whisper)
   const { getTranscriptor, transcripcionHabilitada } = await import("./lib/server/radio/transcriptor");
   if (transcripcionHabilitada()) getTranscriptor().iniciar();
+  // Selectivas por estación (no requiere IA)
+  if (process.env.RADIO_SELECTIVAS !== "0") {
+    const { getSelectivas } = await import("./lib/server/radio/selectivas");
+    getSelectivas().iniciar();
+  }
 }
