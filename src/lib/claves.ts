@@ -111,9 +111,15 @@ export function clavesEnTexto(texto: string): Clave[] {
       .normalize("NFD")
       .replace(/[̀-ͯ]/g, ""),
   );
+  // Quitar códigos de unidad: "máquina 10-1" o "ambulancia 138-2" no son claves. "Unidad" NO se quita:
+  // "la unidad 10-30" sí es una clave (la unidad informa que ingresa a su base).
+  const sinUnidades = t.replace(
+    /\b(?:maquin\w*|ambulancia|rescate|cisterna|escala|medic[oa]|compania|bomba|reslig|matpel|amb|res|cist|esc|med|plt|m|b)[\s.-]*\d{1,3}(?:[\s.-]+\d{1,2}(?!\d))?/g,
+    " ",
+  );
   const out = new Map<string, Clave>();
   // Sin letra/dígito/guion antes ("M10-1" es una unidad, no la clave 10-01) y sin coma como separador ("calle 10, 15 m")
-  for (const m of t.matchAll(/(?<![\w-])(10|20|30|33)(?:\s*[-.]\s*|\s+)(\d{1,2})(?![\d-])/g)) {
+  for (const m of sinUnidades.matchAll(/(?<![\w-])(10|20|30|33)(?:\s*[-.]\s*|\s+)(\d{1,2})(?![\d-])/g)) {
     const serie = m[1] === "33" ? "30" : m[1]; // la lámina trae "33.12" por "30.12"
     const c = POR_CODIGO.get(`${serie}-${m[2].padStart(2, "0")}`);
     if (c) out.set(c.codigo, c);

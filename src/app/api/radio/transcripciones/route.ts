@@ -16,6 +16,7 @@ export async function GET() {
       habilitada: transcripcionHabilitada(),
       activa: t.activo,
       audio: t.audioOk,
+      canales: t.estadoCanales(),
       actividad: t.actividadOk,
       transmisiones,
     },

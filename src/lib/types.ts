@@ -104,8 +104,12 @@ export interface MatpelResultado {
 /** Una transmisión de radio transcrita (puede agrupar un intercambio Central ↔ unidad). */
 export interface Transmision {
   id: string;
-  /** Receptor/canal, p. ej. "C-2" (Central) */
+  /** Receptor/canal, p. ej. "C-2" (Central). Con el Scan, el canal que más habló en el tramo. */
   canal: string;
+  /** Con el Scan: canales que transmitieron durante el tramo (más de uno = audio mezclado) */
+  canales?: string[];
+  /** true si dos canales hablaron a la vez: el texto puede mezclar ambas voces */
+  solapado?: boolean;
   ini: string;
   fin: string;
   /** Segundos con portadora activa */

@@ -2,6 +2,12 @@ import type { Emergencia, ResumenRadio, SelectivaInfo, Transmision } from "@/lib
 import { horaLima } from "@/lib/tiempo";
 import { completarJSON, CONTEXTO, MODELO_RAPIDO } from "../ia";
 import { glosarioClaves } from "@/lib/claves";
+import { cortoCanal } from "@/lib/canales";
+
+/** Contexto de canales para la IA: cada línea de radio lleva su canal (C1–C4). */
+const CANALES_IA = `CANALES: C2 = Central de Emergencias (despacho a compañías, selectivas). C1 y C4 = operaciones entre
+unidades y estaciones en la escena. C3 = cobertura local (cerca de la Central / Jesús María). Lo que se dice en C1/C3/C4
+suele continuar una emergencia ya despachada por C2.`;
 
 const CLAVES_RADIO = `CLAVES DE RADIO DEL CGBVP (se pronuncian "diez treinta y tres" = 10-33; la transcripción puede escribir
 "10-4" por 10-04). Úsalas para interpretar, citando la clave con su significado, p. ej. "10-33 (emergencia controlada)".
@@ -59,13 +65,14 @@ mencionada, tipo de emergencia, o continuidad clara con una transmisión anterio
 ("conforme", "adelante") van con la conversación que continúan, si es evidente. Ante la duda, parte = null.
 La Central suele despachar por radio ANTES de que la emergencia aparezca en el SGO. Las claves de identificación de
 emergencias (serie 20) ayudan a reconocer el tipo.
+${CANALES_IA}
 ${CLAVES_RADIO}`,
     usuario: [
       `EMERGENCIAS (SGO):\n${emergencias.map(lineaEmergencia).join("\n")}`,
       contexto.length
-        ? `TRANSMISIONES ANTERIORES (contexto, ya procesadas):\n${contexto.map((t) => `[${hms(t.ini)}] parte=${t.partes[0] ?? "-"} "${t.texto}"`).join("\n")}`
+        ? `TRANSMISIONES ANTERIORES (contexto, ya procesadas):\n${contexto.map((t) => `[${hms(t.ini)}] ${cortoCanal(t.canal)} parte=${t.partes[0] ?? "-"} "${t.texto}"`).join("\n")}`
         : "",
-      `TRANSMISIONES A VINCULAR:\n${pendientes.map((t) => `id=${t.id} [${hms(t.ini)}] "${t.texto}"`).join("\n")}`,
+      `TRANSMISIONES A VINCULAR:\n${pendientes.map((t) => `id=${t.id} [${hms(t.ini)}] ${cortoCanal(t.canal)} "${t.texto}"`).join("\n")}`,
     ]
       .filter(Boolean)
       .join("\n\n"),
@@ -113,7 +120,7 @@ export async function resumirRadio(e: Emergencia, txs: Transmision[], selectivas
       t: s.epoch * 1000,
       l: `[${hms(new Date(s.epoch * 1000).toISOString())}] SELECTIVA: la Central llama por tono a ${s.cia}${s.origen === "inferida" ? " (probable)" : ""}`,
     })),
-    ...txs.map((t) => ({ t: Date.parse(t.ini), l: `[${hms(t.ini)}] "${t.texto}"` })),
+    ...txs.map((t) => ({ t: Date.parse(t.ini), l: `[${hms(t.ini)}] ${cortoCanal(t.canal)} "${t.texto}"` })),
   ]
     .sort((a, b) => a.t - b.t)
     .map((x) => x.l);
@@ -126,9 +133,10 @@ export async function resumirRadio(e: Emergencia, txs: Transmision[], selectivas
     nombre: "resumen_radio",
     schema: SCHEMA_RESUMEN,
     sistema: `${CONTEXTO}
-Resumes lo comunicado por la radio de la Central sobre UNA emergencia. Las transcripciones son automáticas y pueden
+Resumes lo comunicado por radio (todos los canales) sobre UNA emergencia. Las transcripciones son automáticas y pueden
 tener errores en números y nombres: no inventes lo que no se dijo y marca como "(no confirmado)" lo dudoso.
 Interpreta las claves con el glosario; si un número no está en el glosario o no encaja, no lo interpretes.
+${CANALES_IA}
 ${CLAVES_RADIO}`,
     usuario: `EMERGENCIA (SGO): ${lineaEmergencia(e)}\n\nRADIO (hora de Lima):\n${lineas.join("\n")}`,
   });

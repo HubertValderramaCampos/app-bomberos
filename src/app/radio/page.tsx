@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { CANALES_RADIO } from "@/lib/canales";
 import { AudioLines, Headphones, LoaderCircle, Megaphone, Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { ListaTransmisiones } from "@/components/ListaTransmisiones";
 import { ReferenciaClaves } from "@/components/ReferenciaClaves";
@@ -14,6 +15,8 @@ import { hace, horaLima } from "@/lib/tiempo";
 export default function RadioPage() {
   const r = useRadio();
   const { prefs, transmisiones, transcripcionHabilitada } = useLive();
+  const [filtroCanal, setFiltroCanal] = useState<string | null>(null);
+  const visibles = filtroCanal ? transmisiones.filter((t) => t.canal === filtroCanal) : transmisiones;
   const ahora = useAhora(15_000);
   const { setObservando } = r;
 
@@ -124,18 +127,35 @@ export default function RadioPage() {
         <section className="rounded-2xl border border-line bg-surface">
           <header className="flex items-center gap-2 border-b border-line px-4 py-3">
             <AudioLines className="size-4 text-ok" />
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Transcripción en vivo · Canal 2 (Central)</h2>
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Transcripción en vivo</h2>
             <span className="ml-auto flex items-center gap-1.5 text-[11px] text-dim">
               <span className="size-1.5 animate-pulse rounded-full bg-ok" /> Whisper
             </span>
           </header>
-          {transmisiones.length === 0 ? (
+          <div className="flex gap-1.5 overflow-x-auto border-b border-line px-4 py-2 no-scrollbar" role="group" aria-label="Filtrar por canal">
+            {[{ id: null, txt: "Todos" }, ...Object.entries(CANALES_RADIO).map(([id, c]) => ({ id, txt: c.nombre }))].map((f) => {
+              const n = f.id ? transmisiones.filter((t) => t.canal === f.id).length : transmisiones.length;
+              return (
+                <button
+                  key={f.id ?? "todos"}
+                  onClick={() => setFiltroCanal(f.id)}
+                  aria-pressed={filtroCanal === f.id}
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium ${
+                    filtroCanal === f.id ? "border-transparent bg-text text-bg" : "border-line text-muted hover:border-line-strong"
+                  }`}
+                >
+                  {f.txt} <span className="tabular opacity-60">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+          {visibles.length === 0 ? (
             <p className="p-4 text-sm text-muted">
-              Esperando transmisiones de la Central… Cada comunicación aparece aquí transcrita y, cuando es posible, vinculada a su emergencia.
+              Esperando transmisiones… Cada comunicación aparece aquí transcrita, con su canal y, cuando es posible, vinculada a su emergencia.
             </p>
           ) : (
             <div className="max-h-[28rem] overflow-y-auto scroll-thin">
-              <ListaTransmisiones items={transmisiones.slice(0, 60)} />
+              <ListaTransmisiones items={visibles.slice(0, 80)} />
             </div>
           )}
           <p className="border-t border-line px-4 py-2.5 text-[11px] leading-relaxed text-dim">

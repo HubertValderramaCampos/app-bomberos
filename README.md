@@ -28,7 +28,10 @@ Radio Icecast (radio.lenznetwork.com) ──► navegador directo (CORS abierto)
 
 ### Transcripción de la radio (Whisper)
 
-- `src/lib/server/radio/transcriptor.ts`: el servidor escucha el Canal 2 (Central) 24/7. El feed `/actividad` del receptor
+- `src/lib/server/radio/transcriptor.ts`: el servidor escucha los Canales 1 a 4 24/7. Por defecto usa el stream
+  «Scan 1-4» (una sola conexión) y etiqueta cada transmisión con el canal que hablaba según el feed de actividad; si dos
+  canales hablan a la vez se marca como superpuesta (⚠). Con `RADIO_FUENTE=canales` usa un stream por canal (audio
+  limpio aunque hablen a la vez, 4 conexiones). C2 es la Central (despacho); C1/C3/C4, operaciones. El feed `/actividad` del receptor
   indica cuándo hay portadora; solo se recortan y transcriben esas transmisiones (no se paga por silencio). El audio llega
   ~0,5 s después de la marca de actividad (medido). Intercambios con huecos ≤ 3 s se agrupan.
 - Filtros anti-alucinación: confianza de cada fragmento de Whisper (`no_speech_prob`, `avg_logprob`), frases típicas
@@ -36,7 +39,7 @@ Radio Icecast (radio.lenznetwork.com) ──► navegador directo (CORS abierto)
 - Vínculo con la emergencia: primero por código de unidad ("Ambulancia 138-2" ↔ `AMB138-2` del SGO); si no hay código,
   la IA lo intenta con dirección, distrito y contexto (y reintenta cuando aparece una emergencia nueva en el SGO).
 - Costo: whisper-1 ≈ US$0,006 por minuto de audio. En las pruebas el Canal 2 tuvo voz ~20 % del tiempo ≈ US$1,6/día.
-  Tope diario configurable (`RADIO_MAX_MIN_DIA`, por defecto 480 min ≈ US$2,9/día).
+  Tope diario configurable para todos los canales (`RADIO_MAX_MIN_DIA`, por defecto 720 min ≈ US$4,3/día).
 - Las transcripciones pueden contener direcciones y datos de personas: se guardan solo 24 h.
 
 ### Selectivas por estación
@@ -71,7 +74,9 @@ SGO_POLL_MS=60000                    # mínimo 30000
 # MONITOR_DESACTIVADO=1              # no consultar el SGO (desarrollo de UI)
 # RADIO_TRANSCRIPCION=0              # desactiva la transcripción de la radio
 # RADIO_MODELO_TRANSCRIPCION=whisper-1
-# RADIO_MAX_MIN_DIA=480              # tope diario de minutos transcritos
+# RADIO_FUENTE=scan                  # scan (1 stream "Scan 1-4") | canales (1 stream por canal)
+# RADIO_CANALES=C-2,C-1,C-3,C-4     # canales a transcribir (por defecto, los 4)
+# RADIO_MAX_MIN_DIA=720              # tope diario de minutos transcritos (todos los canales)
 ```
 
 ## Ejecutar

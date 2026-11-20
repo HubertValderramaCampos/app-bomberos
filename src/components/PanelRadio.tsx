@@ -40,7 +40,7 @@ export function PanelRadio({ parte }: { parte: string }) {
     <section className="rounded-2xl border border-line bg-surface" aria-label="Radio de la Central">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <AudioLines className="size-4 text-ok" />
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Radio · Central de Emergencias</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Radio · lo comunicado</h2>
         {txs.length > 0 && <span className="ml-auto text-[11px] text-dim">{txs.length} transmisiones</span>}
       </header>
 
@@ -48,8 +48,8 @@ export function PanelRadio({ parte }: { parte: string }) {
 
       {cargado && txs.length === 0 && (
         <p className="p-4 text-sm text-muted">
-          Aún no hay comunicaciones de radio vinculadas a esta emergencia. Se transcribe el Canal 2 (Central, Lima Centro); las
-          emergencias de otras zonas no pasan por ese canal.
+          Aún no hay comunicaciones de radio vinculadas a esta emergencia. Se transcriben los canales 1 a 4 de la IV Comandancia
+          (Lima Centro); las emergencias de otras zonas no pasan por esta radio.
         </p>
       )}
 

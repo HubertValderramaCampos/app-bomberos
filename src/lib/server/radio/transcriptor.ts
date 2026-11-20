@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { toFile } from "openai";
 import type { Transmision } from "@/lib/types";
+import { CANALES_RADIO } from "@/lib/canales";
 import { clienteIA, IANoDisponible, registrarErrorIA } from "../ia";
 import { getMonitor } from "../monitor";
 import { guardar, leer } from "../store";
@@ -9,19 +10,29 @@ import { extraerUnidades, vincularPorCodigo } from "./vinculo";
 import { vincularConIA } from "./radio-ia";
 
 /**
- * Escucha la Central de Emergencias (Canal 2) y transcribe cada transmisión con Whisper.
+ * Escucha los canales de la radio de la IV CDLC y transcribe cada transmisión con Whisper.
  *
- * - Audio: stream MP3 de Icecast en un búfer circular con la hora de llegada de cada bloque.
- * - Cuándo hay voz: el feed SSE /actividad del receptor SDR (portadora por canal, con su propia marca
- *   de tiempo `t`). Medido: el audio llega ~0,5 s después de `t`. Solo se transcribe lo que tiene portadora,
- *   así no se paga por silencio y se evitan las "alucinaciones" de Whisper sobre ruido.
+ * - Audio: un stream MP3 por canal (no el "Scan", que mezcla canales cuando hablan dos a la vez),
+ *   cada uno en un búfer circular con la hora de llegada de cada bloque.
+ * - Cuándo hay voz: un solo feed SSE /actividad del receptor SDR trae la portadora de todos los canales
+ *   con su marca de tiempo `t`. Medido: el audio llega ~0,5 s después de `t`. Solo se transcribe lo que
+ *   tiene portadora: no se paga por silencio y se evitan las "alucinaciones" de Whisper sobre ruido.
  * - Intercambios seguidos (hueco ≤ 3 s) se agrupan en una sola transmisión.
  */
 
 const BASE = process.env.RADIO_BASE || "https://radio.lenznetwork.com";
-const CANAL = { id: "C-2", mount: "/sdr-canal2.mp3" };
+const IDS_CANALES = (process.env.RADIO_CANALES || "C-2,C-1,C-3,C-4")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((id) => CANALES_RADIO[id]);
+/**
+ * scan (por defecto): un solo stream "Scan 1-4" (/todos.mp3) con todo lo que suena en cualquier canal;
+ *   el feed de actividad dice qué canal hablaba para etiquetar cada transmisión.
+ * canales: un stream por canal; audio más limpio cuando dos canales hablan a la vez, 4 conexiones.
+ */
+const FUENTE = process.env.RADIO_FUENTE === "canales" ? "canales" : "scan";
 const MODELO = process.env.RADIO_MODELO_TRANSCRIPCION || "whisper-1";
-const MAX_MIN_DIA = Number(process.env.RADIO_MAX_MIN_DIA) || 480; // tope de costo: 8 h de audio/día
+const MAX_MIN_DIA = Number(process.env.RADIO_MAX_MIN_DIA) || 720; // tope de costo diario (todos los canales)
 const UA = "Mozilla/5.0 (compatible; Alerta116/1.0)";
 
 const LATENCIA = 0.5; // s entre `t` de actividad y llegada del audio
@@ -44,6 +55,10 @@ interface Segmento {
   fin: number | null;
   tramo: number | null; // inicio del tramo con portadora en curso
   voz: number;
+  /** Segundos con portadora por canal (con el Scan pueden ser varios) */
+  porCanal: Record<string, number>;
+  /** Segundos con dos o más canales hablando a la vez (audio superpuesto en el Scan) */
+  solape: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -65,52 +80,25 @@ function repitePrompt(texto: string): boolean {
   return false;
 }
 
-class Transcriptor extends EventEmitter {
-  activo = false;
+/** Un canal: su stream de audio, su búfer y el recorte de transmisiones según la portadora. */
+class Canal {
   audioOk = false;
-  actividadOk = false;
   private chunks: { t: number; b: Buffer }[] = [];
   private seg: Segmento | null = null;
   private cierre: NodeJS.Timeout | null = null;
   private portadora = false;
-  private ultimoT = 0;
-  /** Desfase reloj local − reloj del receptor (mínimo observado ≈ retardo de red) */
-  private desfase = 0;
-  private desfaseMin = Infinity;
-  private cola: { seg: Segmento; audio: Buffer }[] = [];
-  private enCurso = 0;
-  private uso = { dia: "", seg: 0 };
-  private intentosIA = new Map<string, number>();
-  private hayNovedadIA = false;
 
-  constructor() {
-    super();
-    this.setMaxListeners(0);
-  }
+  constructor(
+    readonly id: string,
+    private readonly mount: string,
+    private readonly t: Transcriptor,
+  ) {}
 
-  lista(): Transmision[] {
-    return leer<Transmision[]>("transmisiones", []);
-  }
-
-  iniciar() {
-    if (this.activo) return;
-    this.activo = true;
-    console.log(`[radio] transcripción activa — ${CANAL.id} (${CANAL.mount}) con ${MODELO}`);
-    void this.bucleAudio();
-    void this.bucleActividad();
-    // Vinculación por IA de lo que no tenía código de unidad (y re-intento cuando aparece una emergencia nueva)
-    setInterval(() => void this.vincularPendientes(), 45_000).unref?.();
-    getMonitor().on("evento", (ev: { tipo: string }) => {
-      if (ev.tipo === "nueva") this.hayNovedadIA = true;
-    });
-  }
-
-  // ── Audio ────────────────────────────────────────────────────────────────
-  private async bucleAudio() {
+  async bucleAudio() {
     let espera = 2_000;
     for (;;) {
       try {
-        const r = await fetch(`${BASE}${CANAL.mount}?t=${Date.now()}`, { headers: { "User-Agent": UA }, cache: "no-store" });
+        const r = await fetch(`${BASE}${this.mount}?t=${Date.now()}`, { headers: { "User-Agent": UA }, cache: "no-store" });
         if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
         this.audioOk = true;
         espera = 2_000;
@@ -122,14 +110,145 @@ class Transcriptor extends EventEmitter {
         throw new Error("el stream terminó");
       } catch (err) {
         this.audioOk = false;
-        console.warn(`[radio] audio: ${(err as Error).message}; reintento en ${espera / 1000}s`);
+        console.warn(`[radio] ${this.id} audio: ${(err as Error).message}; reintento en ${espera / 1000}s`);
         await sleep(espera);
         espera = Math.min(60_000, espera * 2);
       }
     }
   }
 
-  // ── Actividad (cuándo hay portadora) ─────────────────────────────────────
+  private ultimoT: number | null = null;
+  private activosPrev: string[] = [];
+
+  /**
+   * Estado de portadora en el instante t (lo reparte el feed de actividad). `activos` son los canales
+   * que transmiten: en modo por canal, el propio; con el Scan, cualquiera de los 4.
+   */
+  alEstado(t: number, on: boolean, activos: string[] = on ? [this.id] : []) {
+    // Tiempo transcurrido desde el evento anterior, atribuido a los canales que estaban hablando
+    if (this.seg && this.ultimoT !== null && this.portadora) {
+      const dt = Math.max(0, t - this.ultimoT);
+      for (const c of this.activosPrev) this.seg.porCanal[c] = (this.seg.porCanal[c] ?? 0) + dt;
+      if (this.activosPrev.length > 1) this.seg.solape += dt;
+    }
+    this.ultimoT = t;
+    this.activosPrev = activos;
+
+    // Portadora pegada (squelch abierto): cortar cada MAX_SEG para no acumular sin fin
+    if (on && this.portadora && this.seg && t - this.seg.ini > MAX_SEG) {
+      this.cerrarTramo(t);
+      this.finalizar();
+      this.abrirTramo(t, activos);
+      return;
+    }
+    if (on && !this.portadora) this.abrirTramo(t, activos);
+    else if (!on && this.portadora) this.cerrarTramo(t);
+  }
+
+  /** El feed se cortó: no dejar una transmisión abierta. */
+  cortar(t: number) {
+    if (this.portadora) this.cerrarTramo(t);
+  }
+
+  private abrirTramo(t: number, activos: string[]) {
+    this.portadora = true;
+    // Se agrupa con la transmisión anterior solo si es el mismo canal (un intercambio en C2 no se mezcla con C1)
+    const mismoCanal = activos.some((c) => (this.seg?.porCanal[c] ?? 0) > 0);
+    if (this.seg && this.seg.fin !== null && t - this.seg.fin <= FUSION && t - this.seg.ini < MAX_SEG && mismoCanal) {
+      if (this.cierre) clearTimeout(this.cierre);
+      this.cierre = null;
+      this.seg.fin = null;
+    } else {
+      if (this.seg) this.finalizar();
+      this.seg = { ini: t, fin: null, tramo: null, voz: 0, porCanal: {}, solape: 0 };
+    }
+    this.seg.tramo = t;
+  }
+
+  private cerrarTramo(t: number) {
+    this.portadora = false;
+    const s = this.seg;
+    if (!s || s.tramo === null) return;
+    s.voz += Math.max(0, t - s.tramo);
+    s.tramo = null;
+    s.fin = t;
+    // Esperar a que llegue el audio del final + la ventana para agrupar respuestas
+    const listoEn = (t + this.t.desfase + LATENCIA + POST) * 1000 - Date.now();
+    if (this.cierre) clearTimeout(this.cierre);
+    this.cierre = setTimeout(() => this.finalizar(), Math.max(0, listoEn) + FUSION * 1000);
+  }
+
+  private finalizar() {
+    const s = this.seg;
+    this.seg = null;
+    if (this.cierre) clearTimeout(this.cierre);
+    this.cierre = null;
+    if (!s || s.fin === null || s.voz < MIN_VOZ) return;
+    const desde = (s.ini + this.t.desfase + LATENCIA - PRE) * 1000;
+    const hasta = (s.fin + this.t.desfase + LATENCIA + POST) * 1000;
+    const audio = alinearFrame(Buffer.concat(this.chunks.filter((c) => c.t >= desde && c.t <= hasta).map((c) => c.b)));
+    if (audio.length < 3_000) return;
+    // Etiqueta: el canal que más habló; con el Scan pueden ser varios
+    const canales = Object.entries(s.porCanal)
+      .filter(([, seg]) => seg >= 0.3)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c]) => c);
+    this.t.encolar(canales[0] ?? this.id, s, audio, canales);
+  }
+}
+
+class Transcriptor extends EventEmitter {
+  activo = false;
+  actividadOk = false;
+  /** Desfase reloj local − reloj del receptor (mínimo observado ≈ retardo de red) */
+  desfase = 0;
+  private desfaseMin = Infinity;
+  private ultimoT = 0;
+  private canales: Canal[] = [];
+  private cola: { canal: string; canales: string[]; seg: Segmento; audio: Buffer }[] = [];
+  private enCurso = 0;
+  private uso = { dia: "", seg: 0 };
+  private intentosIA = new Map<string, number>();
+  private hayNovedadIA = false;
+
+  constructor() {
+    super();
+    this.setMaxListeners(0);
+  }
+
+  /** true si todos los canales configurados reciben audio */
+  get audioOk() {
+    return this.canales.length > 0 && this.canales.every((c) => c.audioOk);
+  }
+
+  estadoCanales(): Record<string, boolean> {
+    return Object.fromEntries(this.canales.map((c) => [c.id, c.audioOk]));
+  }
+
+  lista(): Transmision[] {
+    return leer<Transmision[]>("transmisiones", []);
+  }
+
+  iniciar() {
+    if (this.activo) return;
+    this.activo = true;
+    this.canales =
+      FUENTE === "scan"
+        ? [new Canal("SCAN", "/todos.mp3", this)]
+        : IDS_CANALES.map((id) => new Canal(id, CANALES_RADIO[id].mount, this));
+    console.log(
+      `[radio] transcripción activa — ${FUENTE === "scan" ? "Scan 1-4" : "por canal"} (${IDS_CANALES.join(", ")}) con ${MODELO}, tope ${MAX_MIN_DIA} min/día`,
+    );
+    for (const c of this.canales) void c.bucleAudio();
+    void this.bucleActividad();
+    // Vinculación por IA de lo que no tenía código de unidad (y re-intento cuando aparece una emergencia nueva)
+    setInterval(() => void this.vincularPendientes(), 45_000).unref?.();
+    getMonitor().on("evento", (ev: { tipo: string }) => {
+      if (ev.tipo === "nueva") this.hayNovedadIA = true;
+    });
+  }
+
+  // ── Actividad (cuándo hay portadora, todos los canales) ──────────────────
   private async bucleActividad() {
     let espera = 2_000;
     for (;;) {
@@ -158,7 +277,7 @@ class Transcriptor extends EventEmitter {
         throw new Error("el feed terminó");
       } catch (err) {
         this.actividadOk = false;
-        if (this.seg) this.cerrarTramo(this.ultimoT); // no dejar una transmisión abierta
+        for (const c of this.canales) c.cortar(this.ultimoT);
         console.warn(`[radio] actividad: ${(err as Error).message}; reintento en ${espera / 1000}s`);
         await sleep(espera);
         espera = Math.min(60_000, espera * 2);
@@ -167,74 +286,33 @@ class Transcriptor extends EventEmitter {
   }
 
   private alEvento(d: { t: number; a: Record<string, number> }) {
-    const ahora = Date.now() / 1000;
-    const edad = ahora - d.t;
+    const edad = Date.now() / 1000 - d.t;
     if (edad > 30 || d.t <= this.ultimoT) return; // ráfaga de eventos viejos al conectar, o duplicados
     if (edad < this.desfaseMin) {
       this.desfaseMin = edad;
       this.desfase = edad;
     }
     this.ultimoT = d.t;
-    const on = (d.a[CANAL.id] ?? 0) > 0;
-
-    // Portadora pegada (squelch abierto): cortar cada MAX_SEG para no acumular sin fin
-    if (on && this.portadora && this.seg && d.t - this.seg.ini > MAX_SEG) {
-      this.cerrarTramo(d.t);
-      this.finalizar();
-      this.abrirTramo(d.t);
-      return;
-    }
-    if (on && !this.portadora) this.abrirTramo(d.t);
-    else if (!on && this.portadora) this.cerrarTramo(d.t);
-  }
-
-  private abrirTramo(t: number) {
-    this.portadora = true;
-    if (this.seg && this.seg.fin !== null && t - this.seg.fin <= FUSION && t - this.seg.ini < MAX_SEG) {
-      if (this.cierre) clearTimeout(this.cierre);
-      this.cierre = null;
-      this.seg.fin = null;
+    if (FUENTE === "scan") {
+      // Un solo audio: hay "portadora" si cualquiera de los canales configurados habla
+      const activos = IDS_CANALES.filter((id) => (d.a[id] ?? 0) > 0);
+      this.canales[0]?.alEstado(d.t, activos.length > 0, activos);
     } else {
-      if (this.seg) this.finalizar();
-      this.seg = { ini: t, fin: null, tramo: null, voz: 0 };
+      for (const c of this.canales) c.alEstado(d.t, (d.a[c.id] ?? 0) > 0);
     }
-    this.seg.tramo = t;
-  }
-
-  private cerrarTramo(t: number) {
-    this.portadora = false;
-    const s = this.seg;
-    if (!s || s.tramo === null) return;
-    s.voz += Math.max(0, t - s.tramo);
-    s.tramo = null;
-    s.fin = t;
-    // Esperar a que llegue el audio del final + la ventana para agrupar respuestas
-    const listoEn = (t + this.desfase + LATENCIA + POST) * 1000 - Date.now();
-    if (this.cierre) clearTimeout(this.cierre);
-    this.cierre = setTimeout(() => this.finalizar(), Math.max(0, listoEn) + FUSION * 1000);
-  }
-
-  private finalizar() {
-    const s = this.seg;
-    this.seg = null;
-    if (this.cierre) clearTimeout(this.cierre);
-    this.cierre = null;
-    if (!s || s.fin === null || s.voz < MIN_VOZ) return;
-    const desde = (s.ini + this.desfase + LATENCIA - PRE) * 1000;
-    const hasta = (s.fin + this.desfase + LATENCIA + POST) * 1000;
-    const partes = this.chunks.filter((c) => c.t >= desde && c.t <= hasta).map((c) => c.b);
-    const audio = alinearFrame(Buffer.concat(partes));
-    if (audio.length < 3_000) return;
-    this.cola.push({ seg: s, audio });
-    void this.procesarCola();
   }
 
   // ── Transcripción ───────────────────────────────────────────────────────
+  encolar(canal: string, seg: Segmento, audio: Buffer, canales: string[] = [canal]) {
+    this.cola.push({ canal, canales, seg, audio });
+    void this.procesarCola();
+  }
+
   private async procesarCola() {
-    while (this.enCurso < 2 && this.cola.length) {
+    while (this.enCurso < 3 && this.cola.length) {
       const item = this.cola.shift()!;
       this.enCurso++;
-      this.transcribir(item.seg, item.audio)
+      this.transcribir(item.canal, item.canales, item.seg, item.audio)
         .catch((err) => {
           if (!(err instanceof IANoDisponible)) console.error("[radio] transcripción:", (err as Error).message);
         })
@@ -253,7 +331,7 @@ class Transcriptor extends EventEmitter {
     return true;
   }
 
-  private async transcribir(s: Segmento, audio: Buffer) {
+  private async transcribir(canal: string, canales: string[], s: Segmento, audio: Buffer) {
     const c = clienteIA();
     const duracionAudio = s.fin! - s.ini + PRE + POST;
     if (!this.dentroDelTope(duracionAudio)) {
@@ -290,8 +368,8 @@ class Transcriptor extends EventEmitter {
     const unidades = extraerUnidades(texto);
     const partes = vincularPorCodigo(unidades, getMonitor().snapshot().emergencias);
     const tx: Transmision = {
-      id: `${CANAL.id}-${Math.round(s.ini * 1000)}`,
-      canal: CANAL.id,
+      id: `${canal}-${Math.round(s.ini * 1000)}`,
+      canal,
       ini: new Date(s.ini * 1000).toISOString(),
       fin: new Date(s.fin! * 1000).toISOString(),
       duracion: Math.round(s.voz * 10) / 10,
@@ -299,10 +377,11 @@ class Transcriptor extends EventEmitter {
       unidades,
       partes,
       vinculo: partes.length ? "codigo" : null,
+      ...(canales.length > 1 ? { canales, solapado: s.solape >= 0.5 } : {}),
     };
     this.guardarTx(tx);
     if (!partes.length) this.hayNovedadIA = true;
-    console.log(`[radio] ${tx.duracion}s${partes.length ? ` → #${partes.join(",")}` : ""}: ${texto.slice(0, 90)}`);
+    console.log(`[radio] ${canales.join("+") || canal} ${tx.duracion}s${partes.length ? ` → #${partes.join(",")}` : ""}: ${texto.slice(0, 90)}`);
   }
 
   private guardarTx(tx: Transmision) {
@@ -310,7 +389,7 @@ class Transcriptor extends EventEmitter {
     const lista = this.lista().filter((x) => x.id !== tx.id && ahora - new Date(x.ini).getTime() < RETENCION_MS);
     lista.push(tx);
     lista.sort((a, b) => a.ini.localeCompare(b.ini));
-    guardar("transmisiones", lista.slice(-2000));
+    guardar("transmisiones", lista.slice(-4000));
     this.emit("transmision", tx);
   }
 
@@ -327,11 +406,11 @@ class Transcriptor extends EventEmitter {
       .snapshot()
       .emergencias.filter((e) => ahora - new Date(e.fecha).getTime() < 3 * 3600_000);
     if (!emergencias.length) return;
-    const contexto = recientes.filter((t) => !pendientes.includes(t)).slice(-12);
+    const contexto = recientes.filter((t) => !pendientes.includes(t)).slice(-16);
     try {
-      const vinculos = await vincularConIA(pendientes.slice(-25), contexto, emergencias);
+      const vinculos = await vincularConIA(pendientes.slice(-30), contexto, emergencias);
       for (const t of pendientes) this.intentosIA.set(t.id, (this.intentosIA.get(t.id) ?? 0) + 1);
-      if (this.intentosIA.size > 2000) this.intentosIA.clear();
+      if (this.intentosIA.size > 4000) this.intentosIA.clear();
       for (const [id, parte] of Object.entries(vinculos)) {
         if (!parte) continue;
         const tx = this.lista().find((x) => x.id === id);

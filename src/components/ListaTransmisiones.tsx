@@ -5,6 +5,7 @@ import { Link2 } from "lucide-react";
 import type { Transmision } from "@/lib/types";
 import { CATEGORIAS } from "@/lib/categorias";
 import { clavesEnTexto } from "@/lib/claves";
+import { cortoCanal, nombreCanal } from "@/lib/canales";
 import { useLive } from "./providers/LiveProvider";
 
 const hms = (iso: string) =>
@@ -23,6 +24,19 @@ export function ListaTransmisiones({ items, mostrarVinculo = true, nuevas }: { i
             <div className="w-[52px] shrink-0 pt-0.5 text-right">
               <p className="font-mono text-[13px] tabular text-muted">{hms(t.ini).slice(0, 5)}</p>
               <p className="font-mono text-[10px] tabular text-dim">{t.duracion.toFixed(0)} s</p>
+              <p
+                className={`mt-1 inline-block rounded px-1 font-mono text-[10px] font-bold ${
+                  t.solapado ? "bg-warn/15 text-warn" : t.canal === "C-2" ? "bg-accent/15 text-accent-strong" : "bg-surface-3 text-muted"
+                }`}
+                title={
+                  t.solapado
+                    ? `Hablaron a la vez ${(t.canales ?? []).map(nombreCanal).join(" y ")}: el texto puede mezclar voces`
+                    : (t.canales ?? [t.canal]).map(nombreCanal).join(" + ")
+                }
+              >
+                {(t.canales && t.canales.length > 1 ? t.canales : [t.canal]).map(cortoCanal).join("+")}
+                {t.solapado && " ⚠"}
+              </p>
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[15px] leading-snug text-text/90">{t.texto}</p>
