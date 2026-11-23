@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "pe.alerta116.app",
+        "sha256_cert_fingerprints": ["85:53:9C:AA:6A:96:37:ED:15:F7:A6:20:30:87:70:59:F6:23:CF:27:6D:A4:1B:7E:5F:3B:F5:48:FE:91:5A:CB"]
+      }
+    }]
