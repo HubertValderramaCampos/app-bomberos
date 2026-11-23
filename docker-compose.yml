@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    restart: always
+    ports:
+      - "3116:3000"
+    volumes:
+      - datos:/app/data   # suscripciones push, caché de briefings, transcripciones (24 h)
+    # Tope para no saturar la PC (comparte la laptop con el scraper).
+    cpus: "1.0"
+    mem_limit: "768m"
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=512"
+
+volumes:
+  datos:

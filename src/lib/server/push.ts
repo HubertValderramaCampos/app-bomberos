@@ -146,7 +146,7 @@ export async function notificarEmergencia(e: Emergencia, maquinasNuevas?: string
 
   // Sin consulta extra al SGO: el resumen se arma con los datos que ya trajo el sondeo
   const briefing = await Promise.race([
-    obtenerBriefing(e),
+    obtenerBriefing(e, [], "push"),
     new Promise<null>((r) => setTimeout(() => r(null), 12_000)),
   ]).catch(() => null);
 

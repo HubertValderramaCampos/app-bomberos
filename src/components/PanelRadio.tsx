@@ -12,6 +12,7 @@ export function PanelRadio({ parte }: { parte: string }) {
   const { transmisiones: enVivo, transcripcionHabilitada } = useLive();
   const [txs, setTxs] = useState<Transmision[]>([]);
   const [resumen, setResumen] = useState<ResumenRadio | null>(null);
+  const [pendiente, setPendiente] = useState<{ palabras: number; minimo: number; listo: boolean } | null>(null);
   const [cargado, setCargado] = useState(false);
 
   // Cuántas transmisiones vinculadas llegaron en vivo: al cambiar, se pide un resumen actualizado
@@ -21,10 +22,11 @@ export function PanelRadio({ parte }: { parte: string }) {
     let vivo = true;
     fetch(`/api/radio/emergencia/${parte}`)
       .then((r) => r.json())
-      .then((d: { transmisiones: Transmision[]; resumen: ResumenRadio | null }) => {
+      .then((d: { transmisiones: Transmision[]; resumen: ResumenRadio | null; pendiente?: { palabras: number; minimo: number; listo: boolean } | null }) => {
         if (!vivo) return;
         setTxs(d.transmisiones);
         setResumen(d.resumen);
+        setPendiente(d.pendiente ?? null);
         setCargado(true);
       })
       .catch(() => vivo && setCargado(true));
@@ -50,6 +52,12 @@ export function PanelRadio({ parte }: { parte: string }) {
         <p className="p-4 text-sm text-muted">
           Aún no hay comunicaciones de radio vinculadas a esta emergencia. Se transcriben los canales 1 a 4 de la IV Comandancia
           (Lima Centro); las emergencias de otras zonas no pasan por esta radio.
+        </p>
+      )}
+
+      {cargado && !resumen && pendiente && !pendiente.listo && (
+        <p className="border-b border-line px-4 py-3 text-[13px] text-muted">
+          El resumen con IA aparece cuando haya más comunicación por radio ({pendiente.palabras}/{pendiente.minimo} palabras).
         </p>
       )}
 

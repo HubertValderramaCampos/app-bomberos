@@ -1,7 +1,7 @@
 import { getMonitor } from "@/lib/server/monitor";
 import { getTranscriptor } from "@/lib/server/radio/transcriptor";
 import { getSelectivas } from "@/lib/server/radio/selectivas";
-import { resumirRadio } from "@/lib/server/radio/radio-ia";
+import { estadoResumen, resumirRadio } from "@/lib/server/radio/radio-ia";
 import { IANoDisponible } from "@/lib/server/ia";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,8 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/radio/emergenci
 
   let resumen = null;
   let error: string | null = null;
+  // Cuántas palabras faltan para el primer resumen (se muestra sin gastar tokens)
+  const pendiente = transmisiones.length ? estadoResumen(transmisiones) : null;
   if (e && transmisiones.length) {
     try {
       resumen = await resumirRadio(e, transmisiones, selectivas);
@@ -29,5 +31,5 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/radio/emergenci
       if (!(err instanceof IANoDisponible)) console.error("[radio] resumen:", (err as Error).message);
     }
   }
-  return Response.json({ transmisiones, selectivas, resumen, error }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({ transmisiones, selectivas, resumen, error, pendiente }, { headers: { "Cache-Control": "no-store" } });
 }

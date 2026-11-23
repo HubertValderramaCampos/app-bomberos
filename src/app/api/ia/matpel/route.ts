@@ -1,4 +1,4 @@
-import { identificarMatpel, IANoDisponible } from "@/lib/server/ia";
+import { FotoNoDisponible, identificarMatpel, IANoDisponible } from "@/lib/server/ia";
 import { ipDe, permitir } from "@/lib/server/ratelimit";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,12 @@ export async function POST(req: Request) {
     const r = await identificarMatpel(consulta, imagen);
     return Response.json(r);
   } catch (err) {
+    if (err instanceof FotoNoDisponible) {
+      return Response.json(
+        { error: "La identificación por foto no está disponible. Escribe el N° ONU o el nombre que ves en la placa o etiqueta.", codigo: "foto_no_disponible" },
+        { status: 400 },
+      );
+    }
     if (err instanceof IANoDisponible) {
       return Response.json(
         { error: "La IA no está disponible en este momento (sin saldo o sin clave). Usa la referencia rápida y la GRE.", codigo: "ia_no_disponible" },

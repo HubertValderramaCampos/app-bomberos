@@ -4,11 +4,18 @@ import { CATEGORIAS } from "@/lib/categorias";
 import { buscarPorOnu, distanciasGre } from "@/lib/matpel-ref";
 import { horaLima } from "@/lib/tiempo";
 import { guardar, leer } from "./store";
+import { estadoPresupuesto, hayCupo, registrarConsumo, subir, type Prioridad } from "./presupuesto-ia";
+import { importancia } from "./importancia";
 
 export const MODELO_RAPIDO = process.env.OPENAI_MODEL_RAPIDO || "gpt-5.4-mini";
 // MatPel: gpt-5.4-mini identificó igual que gpt-5.4 en las pruebas (texto y foto) en ~6 s en vez de ~20 s.
 // Las distancias críticas no dependen del modelo (ver GRE_DISTANCIAS).
 const MODELO_EXPERTO = process.env.OPENAI_MODEL_EXPERTO || "gpt-5.4-mini";
+// Proveedores compatibles con OpenAI (Groq, DeepSeek…) se configuran con OPENAI_BASE_URL, que el SDK lee solo.
+// Si el modelo no acepta imágenes, IA_VISION=0 desactiva MatPel por foto (la consulta por texto sigue).
+export const IA_VISION = process.env.IA_VISION !== "0";
+
+export class FotoNoDisponible extends Error {}
 
 export const CONTEXTO = `Apoyas a bomberos voluntarios del Cuerpo General de Bomberos Voluntarios del Perú (CGBVP).
 Usa español del Perú y terminología del CGBVP: compañía (B-xxx), unidad/máquina, Central de Emergencias, al mando,
@@ -37,6 +44,7 @@ export function estadoIA() {
     configurada: !!process.env.OPENAI_API_KEY,
     disponible: !!cliente() && !bloqueada,
     ultimoError: g.__iaUltimoError ?? null,
+    presupuesto: estadoPresupuesto(),
   };
 }
 
@@ -61,6 +69,12 @@ export function registrarErrorIA(err: unknown): never {
     console.warn("[ia] IA pausada 10 min:", msg);
     throw new IANoDisponible(msg);
   }
+  // Límite por minuto/día del proveedor (p. ej. plan gratuito de Groq): pausa corta y respaldo local.
+  if (e.status === 429 || /rate limit/i.test(msg)) {
+    g.__iaBloqueadaHasta = Date.now() + 2 * 60_000;
+    console.warn("[ia] límite del proveedor; IA pausada 2 min:", msg);
+    throw new IANoDisponible(msg);
+  }
   throw err;
 }
 
@@ -71,8 +85,11 @@ export async function completarJSON<T>(opts: {
   schema: Record<string, unknown>;
   sistema: string;
   usuario: OpenAI.Chat.ChatCompletionContentPart[] | string;
+  /** Prioridad en el presupuesto diario de tokens (ver presupuesto-ia.ts). */
+  prioridad: Prioridad;
 }): Promise<T> {
   const c = clienteIA();
+  if (!hayCupo(opts.prioridad)) throw new IANoDisponible(`Presupuesto diario sin cupo para prioridad ${opts.prioridad}`);
 
   try {
     const r = await c.chat.completions.create({
@@ -87,6 +104,7 @@ export async function completarJSON<T>(opts: {
         json_schema: { name: opts.nombre, strict: true, schema: opts.schema },
       },
     });
+    registrarConsumo(r.usage?.total_tokens);
     const txt = r.choices[0]?.message?.content;
     if (!txt) throw new Error("Respuesta vacía del modelo");
     g.__iaUltimoError = null;
@@ -136,10 +154,22 @@ export function briefingEnCache(parte: string): Briefing | null {
   return leer<BriefingCache>("briefings", {})[parte] ?? null;
 }
 
-export async function obtenerBriefing(e: Emergencia, unidades: UnidadResumen[] = []): Promise<Briefing> {
+/**
+ * origen "push": se genera solo para avisar; las emergencias de importancia baja usan la guía local (sin tokens).
+ * origen "detalle": alguien abrió la emergencia y lo está pidiendo; su prioridad sube un nivel.
+ */
+export async function obtenerBriefing(
+  e: Emergencia,
+  unidades: UnidadResumen[] = [],
+  origen: "push" | "detalle" = "detalle",
+): Promise<Briefing> {
   const cache = leer<BriefingCache>("briefings", {});
   const previo = cache[e.parte];
   if (previo && previo.clave === claveBriefing(e) && !previo.local) return previo;
+
+  const { nivel } = importancia(e);
+  if (origen === "push" && nivel === "baja") return briefingLocal(e);
+  const prioridad = origen === "detalle" ? subir(nivel) : nivel;
 
   const pendiente = enCurso.get(e.parte);
   if (pendiente) return pendiente;
@@ -160,6 +190,7 @@ export async function obtenerBriefing(e: Emergencia, unidades: UnidadResumen[] =
         modelo: MODELO_RAPIDO,
         esfuerzo: "low",
         nombre: "briefing_emergencia",
+        prioridad,
         schema: SCHEMA_BRIEFING,
         sistema: `${CONTEXTO}\nGeneras un briefing operativo breve para el personal que se dirige o monitorea una emergencia.`,
         usuario: `Emergencia publicada por el SGO del CGBVP:\n${datos}`,
@@ -270,6 +301,7 @@ const SCHEMA_SITUACION = {
   },
 } as const;
 
+const SITUACION_MIN_MS = (Number(process.env.SITUACION_MIN_SEG) || 600) * 1000;
 let situacionCache: { clave: string; t: number; data: Situacion } | null = null;
 let situacionEnCurso: Promise<Situacion> | null = null;
 
@@ -279,7 +311,8 @@ export async function obtenerSituacion(emergencias: Emergencia[]): Promise<Situa
   if (situacionCache) {
     // Mismas emergencias activas → mismo resumen. Si cambiaron, regeneramos como máximo cada 90 s.
     if (situacionCache.clave === clave) return situacionCache.data;
-    if (Date.now() - situacionCache.t < 90_000 && !situacionCache.data.local) return situacionCache.data;
+    // Es la tarea de menor valor: se regenera como máximo cada SITUACION_MIN_SEG (10 min por defecto).
+    if (Date.now() - situacionCache.t < SITUACION_MIN_MS && !situacionCache.data.local) return situacionCache.data;
   }
   if (situacionEnCurso) return situacionEnCurso;
 
@@ -298,6 +331,7 @@ export async function obtenerSituacion(emergencias: Emergencia[]): Promise<Situa
           modelo: MODELO_RAPIDO,
           esfuerzo: "low",
           nombre: "situacion_operativa",
+          prioridad: "baja",
           schema: SCHEMA_SITUACION,
           sistema: `${CONTEXTO}\nResumes la situación operativa actual para un tablero de bomberos.`,
           usuario: `Hora actual (Lima): ${horaLima(new Date().toISOString())}.\nEmergencias ACTIVAS (${activas.length}); cerradas en 24 h: ${cerradas}.\n${lineas}`,
@@ -401,6 +435,10 @@ Reglas:
 - No inventes el N° ONU: si no lo sabes, null.`;
 
 export async function identificarMatpel(consulta: string, imagenDataUrl?: string | null): Promise<MatpelResultado> {
+  if (imagenDataUrl && !IA_VISION) {
+    if (!consulta?.trim()) throw new FotoNoDisponible("La identificación por foto no está disponible");
+    imagenDataUrl = null; // hay texto: se responde con eso
+  }
   const partes: OpenAI.Chat.ChatCompletionContentPart[] = [
     {
       type: "text",
@@ -415,6 +453,7 @@ export async function identificarMatpel(consulta: string, imagenDataUrl?: string
     modelo: MODELO_EXPERTO,
     esfuerzo: (process.env.OPENAI_ESFUERZO_MATPEL as "none" | "low" | "medium") || "low",
     nombre: "identificacion_matpel",
+    prioridad: "critica", // seguridad del personal: lo último que se corta
     schema: SCHEMA_MATPEL,
     sistema: SISTEMA_MATPEL,
     usuario: partes,

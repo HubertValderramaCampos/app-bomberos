@@ -3,6 +3,7 @@ import { horaLima } from "@/lib/tiempo";
 import { completarJSON, CONTEXTO, MODELO_RAPIDO } from "../ia";
 import { glosarioClaves } from "@/lib/claves";
 import { cortoCanal } from "@/lib/canales";
+import { contarPalabras, importancia, PALABRAS_ALERTA } from "../importancia";
 
 /** Contexto de canales para la IA: cada línea de radio lleva su canal (C1–C4). */
 const CANALES_IA = `CANALES: C2 = Central de Emergencias (despacho a compañías, selectivas). C1 y C4 = operaciones entre
@@ -57,6 +58,7 @@ export async function vincularConIA(
     modelo: MODELO_RAPIDO,
     esfuerzo: "low",
     nombre: "vinculos_radio",
+    prioridad: "baja",
     schema: SCHEMA_VINCULOS,
     sistema: `${CONTEXTO}
 Relacionas transmisiones de la radio de la Central de Emergencias (transcritas automáticamente, pueden tener errores)
@@ -109,28 +111,64 @@ const SCHEMA_RESUMEN = {
   },
 } as const;
 
-const cacheResumen = new Map<string, { clave: string; t: number; data: ResumenRadio }>();
+// ── Resumen por umbral de palabras ──────────────────────────────────────────
+// No se gastan tokens por cada "conforme": se resume cuando hay sustancia y se actualiza cuando llega
+// bastante información nueva. Una palabra de alerta (atrapados, colapso, MATPEL…) fuerza la actualización.
+const MIN_PALABRAS = Number(process.env.RESUMEN_MIN_PALABRAS) || 40;
+const NUEVAS_PALABRAS = Number(process.env.RESUMEN_NUEVAS_PALABRAS) || 50;
+const MIN_ENTRE_RESUMENES_MS = 60_000;
+
+const cacheResumen = new Map<string, { ids: Set<string>; palabras: number; t: number; data: ResumenRadio }>();
+
+/** Estado del resumen de una emergencia, para mostrarlo sin gastar tokens. */
+export function estadoResumen(txs: Transmision[]) {
+  const palabras = contarPalabras(txs);
+  return { palabras, minimo: MIN_PALABRAS, listo: palabras >= MIN_PALABRAS || txs.some((t) => PALABRAS_ALERTA.test(t.texto)) };
+}
 
 export async function resumirRadio(e: Emergencia, txs: Transmision[], selectivas: SelectivaInfo[] = []): Promise<ResumenRadio | null> {
   if (!txs.length) return null;
-  const clave = [...txs.map((t) => t.id), ...selectivas.map((s) => s.epoch)].join(",");
-  // Selectivas y transmisiones intercaladas en orden cronológico
+  const previo = cacheResumen.get(e.parte);
+  const nuevas = previo ? txs.filter((t) => !previo.ids.has(t.id)) : txs;
+  if (previo && !nuevas.length) return previo.data;
+
+  const imp = importancia(e, txs);
+  const alertaNueva = nuevas.some((t) => PALABRAS_ALERTA.test(t.texto));
+  if (!previo) {
+    // Primer resumen: solo cuando ya hay sustancia (o una alerta)
+    if (imp.palabras < MIN_PALABRAS && !alertaNueva) return null;
+  } else if (!alertaNueva) {
+    // Actualización: con suficiente información nueva y sin repetir en menos de 1 min
+    if (imp.palabras - previo.palabras < NUEVAS_PALABRAS) return previo.data;
+    if (Date.now() - previo.t < MIN_ENTRE_RESUMENES_MS) return previo.data;
+  }
+
+  // Selectivas y transmisiones intercaladas en orden cronológico. En una actualización solo va lo nuevo
+  // junto con el resumen anterior: menos tokens de entrada que reenviar toda la conversación.
+  const desde = previo ? Math.min(...nuevas.map((t) => Date.parse(t.ini))) : 0;
   const lineas = [
-    ...selectivas.map((s) => ({
-      t: s.epoch * 1000,
-      l: `[${hms(new Date(s.epoch * 1000).toISOString())}] SELECTIVA: la Central llama por tono a ${s.cia}${s.origen === "inferida" ? " (probable)" : ""}`,
-    })),
-    ...txs.map((t) => ({ t: Date.parse(t.ini), l: `[${hms(t.ini)}] ${cortoCanal(t.canal)} "${t.texto}"` })),
+    ...selectivas
+      .filter((s) => s.epoch * 1000 >= desde)
+      .map((s) => ({
+        t: s.epoch * 1000,
+        l: `[${hms(new Date(s.epoch * 1000).toISOString())}] SELECTIVA: la Central llama por tono a ${s.cia}${s.origen === "inferida" ? " (probable)" : ""}`,
+      })),
+    ...nuevas.map((t) => ({ t: Date.parse(t.ini), l: `[${hms(t.ini)}] ${cortoCanal(t.canal)} "${t.texto}"` })),
   ]
     .sort((a, b) => a.t - b.t)
     .map((x) => x.l);
-  const c = cacheResumen.get(e.parte);
-  if (c && (c.clave === clave || Date.now() - c.t < 20_000)) return c.data;
+
+  const anterior = previo
+    ? `\n\nRESUMEN ANTERIOR (actualízalo con lo nuevo; conserva la cronología previa y agrega los eventos nuevos):\n${JSON.stringify(
+        { resumen: previo.data.resumen, estado_actual: previo.data.estado_actual, cronologia: previo.data.cronologia, solicitudes: previo.data.solicitudes, alertas: previo.data.alertas },
+      )}`
+    : "";
 
   const r = await completarJSON<Omit<ResumenRadio, "transmisiones" | "generado">>({
     modelo: MODELO_RAPIDO,
     esfuerzo: "low",
     nombre: "resumen_radio",
+    prioridad: imp.nivel,
     schema: SCHEMA_RESUMEN,
     sistema: `${CONTEXTO}
 Resumes lo comunicado por radio (todos los canales) sobre UNA emergencia. Las transcripciones son automáticas y pueden
@@ -138,10 +176,10 @@ tener errores en números y nombres: no inventes lo que no se dijo y marca como 
 Interpreta las claves con el glosario; si un número no está en el glosario o no encaja, no lo interpretes.
 ${CANALES_IA}
 ${CLAVES_RADIO}`,
-    usuario: `EMERGENCIA (SGO): ${lineaEmergencia(e)}\n\nRADIO (hora de Lima):\n${lineas.join("\n")}`,
+    usuario: `EMERGENCIA (SGO): ${lineaEmergencia(e)}${anterior}\n\n${previo ? "RADIO NUEVA" : "RADIO"} (hora de Lima):\n${lineas.join("\n")}`,
   });
   const data: ResumenRadio = { ...r, transmisiones: txs.length, generado: new Date().toISOString() };
-  cacheResumen.set(e.parte, { clave, t: Date.now(), data });
+  cacheResumen.set(e.parte, { ids: new Set(txs.map((t) => t.id)), palabras: imp.palabras, t: Date.now(), data });
   if (cacheResumen.size > 300) cacheResumen.delete(cacheResumen.keys().next().value!);
   return data;
 }

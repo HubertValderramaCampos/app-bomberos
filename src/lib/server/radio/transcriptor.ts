@@ -32,6 +32,10 @@ const IDS_CANALES = (process.env.RADIO_CANALES || "C-2,C-1,C-3,C-4")
  */
 const FUENTE = process.env.RADIO_FUENTE === "canales" ? "canales" : "scan";
 const MODELO = process.env.RADIO_MODELO_TRANSCRIPCION || "whisper-1";
+// whisper-1 (OpenAI) y whisper-large-v3[-turbo] (Groq) devuelven segmentos con métricas de confianza.
+const ES_WHISPER = /^whisper/i.test(MODELO);
+// Con large-v3-turbo el prompt se repite en vez de transcribir el audio (probado con radio real): no se envía.
+const USAR_PROMPT = !/turbo/i.test(MODELO);
 const MAX_MIN_DIA = Number(process.env.RADIO_MAX_MIN_DIA) || 720; // tope de costo diario (todos los canales)
 const UA = "Mozilla/5.0 (compatible; Alerta116/1.0)";
 
@@ -242,7 +246,8 @@ class Transcriptor extends EventEmitter {
     for (const c of this.canales) void c.bucleAudio();
     void this.bucleActividad();
     // Vinculación por IA de lo que no tenía código de unidad (y re-intento cuando aparece una emergencia nueva)
-    setInterval(() => void this.vincularPendientes(), 45_000).unref?.();
+    // Cada 2 min se agrupan las pendientes en una sola consulta (antes 45 s): menos llamadas, mismo resultado.
+    setInterval(() => void this.vincularPendientes(), 120_000).unref?.();
     getMonitor().on("evento", (ev: { tipo: string }) => {
       if (ev.tipo === "nueva") this.hayNovedadIA = true;
     });
@@ -341,12 +346,12 @@ class Transcriptor extends EventEmitter {
     const file = await toFile(audio, "transmision.mp3", { type: "audio/mpeg" });
     let texto = "";
     try {
-      if (MODELO === "whisper-1") {
+      if (ES_WHISPER) {
         const r = await c.audio.transcriptions.create({
           file,
           model: MODELO,
           language: "es",
-          prompt: PROMPT,
+          ...(USAR_PROMPT ? { prompt: PROMPT } : {}),
           temperature: 0,
           response_format: "verbose_json",
         });
@@ -356,7 +361,7 @@ class Transcriptor extends EventEmitter {
           .map((g) => g.text.trim())
           .join(" ");
       } else {
-        const r = await c.audio.transcriptions.create({ file, model: MODELO, language: "es", prompt: PROMPT });
+        const r = await c.audio.transcriptions.create({ file, model: MODELO, language: "es", ...(USAR_PROMPT ? { prompt: PROMPT } : {}) });
         texto = r.text;
       }
     } catch (err) {
@@ -400,15 +405,21 @@ class Transcriptor extends EventEmitter {
     const ahora = Date.now();
     const lista = this.lista();
     const recientes = lista.filter((t) => ahora - new Date(t.ini).getTime() < 15 * 60_000);
-    const pendientes = recientes.filter((t) => !t.partes.length && (this.intentosIA.get(t.id) ?? 0) < 3);
+    // Menos de 3 palabras ("conforme", "adelante") no aporta para vincular: no se gasta en eso.
+    const pendientes = recientes.filter(
+      (t) => !t.partes.length && (this.intentosIA.get(t.id) ?? 0) < 2 && t.texto.split(/\s+/).filter(Boolean).length >= 3,
+    );
     if (!pendientes.length) return;
+    // Contexto acotado: emergencias de las últimas 2 h, las 25 más recientes
     const emergencias = getMonitor()
       .snapshot()
-      .emergencias.filter((e) => ahora - new Date(e.fecha).getTime() < 3 * 3600_000);
+      .emergencias.filter((e) => ahora - new Date(e.fecha).getTime() < 2 * 3600_000)
+      .sort((a, b) => b.fecha.localeCompare(a.fecha))
+      .slice(0, 25);
     if (!emergencias.length) return;
-    const contexto = recientes.filter((t) => !pendientes.includes(t)).slice(-16);
+    const contexto = recientes.filter((t) => !pendientes.includes(t)).slice(-8);
     try {
-      const vinculos = await vincularConIA(pendientes.slice(-30), contexto, emergencias);
+      const vinculos = await vincularConIA(pendientes.slice(-20), contexto, emergencias);
       for (const t of pendientes) this.intentosIA.set(t.id, (this.intentosIA.get(t.id) ?? 0) + 1);
       if (this.intentosIA.size > 4000) this.intentosIA.clear();
       for (const [id, parte] of Object.entries(vinculos)) {
