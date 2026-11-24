@@ -1,8 +1,9 @@
 import type { Transmision } from "@/lib/types";
 import { cortoCanal } from "@/lib/canales";
-import { completarJSON, CONTEXTO } from "../ia";
+import { completarJSON, CONTEXTO, MODELO_RAPIDO } from "../ia";
+import { hayCupo } from "../presupuesto-ia";
 
-/** Modelo liviano con cuota propia en Groq: el resumen no gasta el presupuesto de despachos y briefings. */
+/** Respaldo liviano con cuota propia en Groq, si el presupuesto diario ya no alcanza para el modelo grande. */
 const MODELO_RESUMEN = process.env.OPENAI_MODEL_RESUMEN || "openai/gpt-oss-20b";
 const palabrasDe = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
 import { getMonitor } from "../monitor";
@@ -31,7 +32,7 @@ export interface ResumenGeneral {
 
 const VENTANA_MS = 45 * 60_000;
 const MIN_PALABRAS_NUEVAS = 25;
-const MIN_ESPERA_MS = 2 * 60_000;
+const MIN_ESPERA_MS = 4 * 60_000;
 /** Más viejo que esto ya no se muestra mientras se genera el nuevo: se espera el nuevo. */
 const MAX_VIGENCIA_MS = 6 * 60_000;
 
@@ -70,12 +71,14 @@ async function generar(txs: Transmision[]): Promise<ResumenGeneral | null> {
     .emergencias.filter((e) => e.activa)
     .slice(0, 30)
     .map((e) => `#${e.parte} ${e.tipoPrincipal} | ${e.direccion}, ${e.distrito} | ${e.maquinas.join(",")}`);
+  // Modelo grande (entiende mejor la radio) mientras haya cupo; si no, el liviano con cuota aparte
+  const grande = hayCupo("media");
   const r = await completarJSON<{ puntos: PuntoRadio[] }>({
-    modelo: MODELO_RESUMEN,
+    modelo: grande ? MODELO_RAPIDO : MODELO_RESUMEN,
     esfuerzo: "low",
     nombre: "resumen_radio_general",
     prioridad: "media",
-    presupuesto: false,
+    presupuesto: grande,
     schema: SCHEMA,
     sistema: `${CONTEXTO}
 Resumes la radio de la Central (transcripción automática con errores) para bomberos que ya conocen el oficio.
@@ -83,7 +86,7 @@ Agrupa TODO lo dicho sobre una misma emergencia en UN solo punto (mismas unidade
 Usa la lista del SGO para completar lugar, tipo y parte cuando las unidades o el lugar coinciden.
 Incluye un punto solo si tiene lugar o unidades concretas y algo operativo (despacho, llegada, pedido de apoyo,
 control, víctimas, riesgo). Descarta confirmaciones sueltas, pruebas de radio, saludos y frases ininteligibles.
-Máximo 5 puntos, el más reciente primero. Estilo telegráfico, sin explicar claves. No inventes.`,
+Máximo 5 puntos, el más reciente primero. Estilo telegráfico, sin explicar claves. Corrige errores obvios de transcripción. No inventes.`,
     usuario: `EMERGENCIAS ACTIVAS (SGO):\n${activas.join("\n") || "-"}\n\nRADIO (últimos 45 min):\n${txs
       .map((t) => `[${hm(t.ini)}] ${cortoCanal(t.canal)}: ${t.texto}`)
       .join("\n")}`,
