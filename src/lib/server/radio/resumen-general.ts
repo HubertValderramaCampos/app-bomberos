@@ -73,15 +73,22 @@ async function generar(txs: Transmision[]): Promise<ResumenGeneral | null> {
     schema: SCHEMA,
     sistema: `${CONTEXTO}
 Resumes la radio de la Central (transcripción automática con errores) para bomberos que ya conocen el oficio.
-Un punto por emergencia o tema operativo, el más reciente primero, máximo 8. Ignora pruebas de radio, saludos y charla.
-Estilo telegráfico, sin explicar claves ni procedimientos. No inventes: si no se entiende, omítelo.`,
+Agrupa TODO lo dicho sobre una misma emergencia en UN solo punto (mismas unidades, lugar o conversación seguida).
+Usa la lista del SGO para completar lugar, tipo y parte cuando las unidades o el lugar coinciden.
+Incluye un punto solo si tiene lugar o unidades concretas y algo operativo (despacho, llegada, pedido de apoyo,
+control, víctimas, riesgo). Descarta confirmaciones sueltas, pruebas de radio, saludos y frases ininteligibles.
+Máximo 5 puntos, el más reciente primero. Estilo telegráfico, sin explicar claves. No inventes.`,
     usuario: `EMERGENCIAS ACTIVAS (SGO):\n${activas.join("\n") || "-"}\n\nRADIO (últimos 45 min):\n${txs
       .map((t) => `[${hm(t.ini)}] ${cortoCanal(t.canal)}: ${t.texto}`)
       .join("\n")}`,
   });
   const validos = new Set(getMonitor().snapshot().emergencias.map((e) => e.parte));
   return {
-    puntos: r.puntos.slice(0, 8).map((p) => ({ ...p, parte: p.parte && validos.has(p.parte) ? p.parte : null })),
+    puntos: r.puntos
+      .filter((p) => p.lugar || p.parte || /d/.test(p.detalle))
+      .sort((a, b) => b.hora.localeCompare(a.hora))
+      .slice(0, 5)
+      .map((p) => ({ ...p, parte: p.parte && validos.has(p.parte) ? p.parte : null })),
     generado: new Date().toISOString(),
     transmisiones: txs.length,
   };
