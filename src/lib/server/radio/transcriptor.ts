@@ -30,7 +30,7 @@ const IDS_CANALES = (process.env.RADIO_CANALES || "C-2,C-1,C-3,C-4")
  *   el feed de actividad dice qué canal hablaba para etiquetar cada transmisión.
  * canales: un stream por canal; audio más limpio cuando dos canales hablan a la vez, 4 conexiones.
  */
-const FUENTE = process.env.RADIO_FUENTE === "canales" ? "canales" : "scan";
+const FUENTE = process.env.RADIO_FUENTE === "scan" ? "scan" : "canales";
 const MODELO = process.env.RADIO_MODELO_TRANSCRIPCION || "whisper-1";
 // whisper-1 (OpenAI) y whisper-large-v3[-turbo] (Groq) devuelven segmentos con métricas de confianza.
 const ES_WHISPER = /^whisper/i.test(MODELO);
@@ -58,6 +58,20 @@ const MODELO_RESPALDO = process.env.RADIO_MODELO_RESPALDO || "whisper-large-v3-t
 const ALUCINACIONES =
   /amara\.org|subt[ií]tul|gracias por ver|suscr[ií]b|www\.|\.com\b|cinematograf|nuestro canal|qu[eé] es (la vida|el video)|sigue viviendo|^\W*$/i;
 /** Frases cortas TODO EN MAYÚSCULAS ("SIN CENTRALES"): típico invento de Whisper sobre ruido de radio. */
+/** "Cinco.", "5, 4, 3, 2, 1, 0" (prueba de audio): una palabra suelta sin código, o una cuenta de números. */
+const esRelleno = (t: string) => {
+  const w = t.replace(/[¡!¿?.,;:]/g, " ").trim().split(/s+/).filter(Boolean);
+  if (w.length === 1 && !/d/.test(w[0])) return true;
+  return /^[ds,.-y]+$/i.test(t) && !/d{2,3}-d/.test(t) && w.length >= 4;
+};
+/** Similitud de palabras (para detectar la misma transmisión oída en dos canales). */
+const similitud = (a: string, b: string) => {
+  const A = new Set(palabras(a)), B = new Set(palabras(b));
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const x of A) if (B.has(x)) n++;
+  return n / Math.min(A.size, B.size);
+};
 const esMayusculasInventadas = (t: string) => !/\d/.test(t) && /^[^a-záéíóúñ]+$/.test(t) && /[A-ZÁÉÍÓÚÑ]{3}/.test(t) && t.split(/\s+/).length <= 7;
 
 interface Segmento {
@@ -386,7 +400,18 @@ class Transcriptor extends EventEmitter {
       registrarErrorIA(err);
     }
     texto = texto.replace(/\s+/g, " ").trim();
-    if (!texto || ALUCINACIONES.test(texto) || repitePrompt(texto)) return;
+    if (!texto || ALUCINACIONES.test(texto) || repitePrompt(texto) || esRelleno(texto)) return;
+
+    // Misma transmisión oída en otro canal a la vez (retransmisión): se une en una sola
+    const ini = s.ini * 1000;
+    const gemela = this.lista().find(
+      (x) => x.canal !== canal && Math.abs(new Date(x.ini).getTime() - ini) < 4000 && similitud(x.texto, texto) >= 0.6,
+    );
+    if (gemela) {
+      const unidas = [...new Set([...(gemela.canales ?? [gemela.canal]), ...canales, canal])];
+      this.guardarTx({ ...gemela, texto: texto.length > gemela.texto.length ? texto : gemela.texto, canales: unidas }, false);
+      return;
+    }
 
     const unidades = extraerUnidades(texto);
     const partes = vincularPorCodigo(unidades, getMonitor().snapshot().emergencias);
@@ -407,13 +432,13 @@ class Transcriptor extends EventEmitter {
     console.log(`[radio] ${canales.join("+") || canal} ${tx.duracion}s${partes.length ? ` → #${partes.join(",")}` : ""}: ${texto.slice(0, 90)}`);
   }
 
-  private guardarTx(tx: Transmision) {
+  private guardarTx(tx: Transmision, emitir = true) {
     const ahora = Date.now();
     const lista = this.lista().filter((x) => x.id !== tx.id && ahora - new Date(x.ini).getTime() < RETENCION_MS);
     lista.push(tx);
     lista.sort((a, b) => a.ini.localeCompare(b.ini));
     guardar("transmisiones", lista.slice(-4000));
-    this.emit("transmision", tx);
+    if (emitir) this.emit("transmision", tx);
   }
 
   // ── Vinculación con IA ──────────────────────────────────────────────────
