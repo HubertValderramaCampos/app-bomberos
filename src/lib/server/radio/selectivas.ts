@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Emergencia, ParTonos, SelectivaInfo, Transmision } from "@/lib/types";
 import { companiaDeUnidad } from "@/lib/categorias";
-import { ciaDeNumero, estacion, PARES_CONFIRMADOS } from "@/lib/estaciones";
+import { ciaDeNumero, ciaDePar, estacion, PARES_CONFIRMADOS } from "@/lib/estaciones";
 import { getMonitor } from "../monitor";
 import { guardar, leer } from "../store";
 import { getTranscriptor } from "./transcriptor";
@@ -167,6 +167,9 @@ class Selectivas extends EventEmitter {
     const fija = PARES_CONFIRMADOS[par] ?? this.confirmadosFuente()[par];
     if (fija) return { cia: fija, origen: "confirmada", confianza: 1 };
     if (r?.ciaFuente && r.origenFuente === "confirmado") return { cia: r.ciaFuente, origen: "confirmada", confianza: 1 };
+    // El par codifica el número de compañía: identificación exacta sin necesidad de aprender
+    const decodificada = ciaDePar(par);
+    if (decodificada) return { cia: decodificada, origen: "confirmada", confianza: 1 };
     const d = leer<Record<string, Deduccion>>("pares_deducidos", {})[par];
     if (d) return { cia: d.cia, origen: "inferida", confianza: d.confianza };
     // El detector de origen a veces propone una compañía sin confirmar
