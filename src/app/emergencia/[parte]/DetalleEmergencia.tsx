@@ -137,8 +137,17 @@ export function DetalleEmergencia({ parte }: { parte: string }) {
         </button>
 
         <p className="mt-2 flex items-center gap-1.5 text-xs text-dim">
-          <Clock className="size-3.5" /> {fechaHoraLima(e.fecha)} · Parte {e.parte}
+          <Clock className="size-3.5" /> {fechaHoraLima(e.fecha)} · {e.fuente === "radio" ? "Detectada por radio · esperando SGO" : `Parte ${e.parte}`}
         </p>
+        {e.radio && (
+          <p className="mt-2 rounded-lg bg-ok/10 px-3 py-2 text-xs text-ok">
+            🔊 {e.fuente === "radio" ? "Despacho escuchado en la radio de la Central" : `La radio la anunció ${Math.round((e.radio.anticipoSeg ?? 0) / 60)} min antes que el SGO`}
+            {e.radio.selectivas.length > 0 && ` · selectiva ${e.radio.selectivas.join(", ")}`}
+          </p>
+        )}
+        {e.unidadesEnEmergencia && e.unidadesEnEmergencia.length > 0 && (
+          <p className="mt-2 text-xs text-warn">SGO interno: {e.unidadesEnEmergencia.join(", ")} en emergencia</p>
+        )}
       </header>
 
       {/* Acciones rápidas */}

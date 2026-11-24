@@ -33,6 +33,20 @@ export interface Emergencia {
   companias: number[];
   /** Cuándo la vio por primera vez este servidor (ISO) */
   vistaEn: string;
+  /** De dónde salió: SGO público (por defecto) o despacho detectado por radio, aún sin parte del SGO */
+  fuente?: "sgo" | "radio";
+  /** Datos del despacho por radio (provisional, o el que se adelantó a esta emergencia del SGO) */
+  radio?: {
+    texto: string;
+    /** Compañías identificadas por su selectiva (par de tonos) */
+    selectivas: string[];
+    /** Cuántos segundos se adelantó la radio al SGO (solo cuando ya se confirmó) */
+    anticipoSeg?: number;
+    /** Id provisional ("R…") con el que apareció antes de confirmarse */
+    provisional?: string;
+  };
+  /** Unidades marcadas EN EMERGENCIA en el SGO interno (estado de vehículos) */
+  unidadesEnEmergencia?: string[];
 }
 
 export interface Snapshot {

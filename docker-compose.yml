@@ -11,6 +11,9 @@ services:
     mem_limit: "768m"
     environment:
       NODE_OPTIONS: "--max-old-space-size=512"
+    # Para leer el estado de unidades que publica el scraper en 127.0.0.1:8085 de esta PC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   datos:

@@ -202,3 +202,16 @@ export async function notificarSelectiva(sel: SelectivaInfo) {
   );
   console.log(`[push] selectiva ${sel.cia}: ${destinos.length} notificación(es)`);
 }
+
+/** Cuando un despacho por radio se confirma en el SGO, quien ya fue avisado no se vuelve a avisar. */
+export function transferirNotificados(desde: string, hacia: string) {
+  const mapa = leer<Mapa>("suscripciones", {});
+  let cambio = false;
+  for (const sub of Object.values(mapa)) {
+    if (sub.notificados.includes(desde) && !sub.notificados.includes(hacia)) {
+      sub.notificados = [...sub.notificados, hacia].slice(-300);
+      cambio = true;
+    }
+  }
+  if (cambio) guardar("suscripciones", mapa);
+}

@@ -59,6 +59,7 @@ export function TarjetaEmergencia({
           <h3 className="min-w-0 flex-1 font-display text-[17px] font-bold uppercase leading-tight tracking-wide">
             {e.tipoPrincipal}
             {nueva && <span className="ml-2 rounded bg-accent px-1.5 py-px align-middle font-sans text-[10px] font-bold text-white">NUEVA</span>}
+            {e.fuente === "radio" && <span className="ml-2 rounded bg-ok/20 px-1.5 py-px align-middle font-sans text-[10px] font-bold text-ok">🔊 RADIO</span>}
           </h3>
           <EstadoBadge estado={e.estado} activa={e.activa} />
         </div>

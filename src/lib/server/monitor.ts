@@ -1,7 +1,28 @@
 import { EventEmitter } from "node:events";
 import type { Emergencia, Snapshot } from "@/lib/types";
 import { obtenerEmergencias, pausarSgo, SgoBloqueado } from "./sgo";
-import { notificarEmergencia } from "./push";
+import { notificarEmergencia, transferirNotificados } from "./push";
+import { normUnidad, unidadesEnEmergencia } from "./unidades";
+
+/** Una provisional por radio se une con la del SGO si este la despacha dentro de esta ventana. */
+const UNIR_ANTES_MS = 5 * 60_000;
+const UNIR_DESPUES_MS = 20 * 60_000;
+/** Provisionales que el SGO nunca publicó se descartan pasado este tiempo. */
+const VIDA_PROVISIONAL_MS = 45 * 60_000;
+
+const normTexto = (t: string) =>
+  t.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Z ]/g, "").replace(/s+/g, " ").trim();
+
+/** ¿La emergencia del SGO `e` es la misma que el despacho por radio `p`? */
+function mismaEmergencia(p: Emergencia, e: Emergencia) {
+  const dt = Date.parse(e.fecha) - Date.parse(p.fecha);
+  if (dt < -UNIR_ANTES_MS || dt > UNIR_DESPUES_MS) return false;
+  const ciasComunes = p.companias.filter((c) => e.companias.includes(c)).length;
+  const unidadesComunes = p.maquinas.filter((m) => e.maquinas.some((x) => normUnidad(x) === normUnidad(m))).length;
+  const mismoDistrito = !!p.distrito && normTexto(p.distrito) === normTexto(e.distrito);
+  if (mismoDistrito && (ciasComunes > 0 || unidadesComunes > 0 || (!p.companias.length && !p.maquinas.length))) return true;
+  return unidadesComunes >= 2 || (ciasComunes >= 2 && unidadesComunes >= 1);
+}
 
 /** Una sola consulta por intervalo para TODOS los usuarios: no se debe saturar el portal del CGBVP. */
 const POLL_MS = Math.max(30_000, Number(process.env.SGO_POLL_MS) || 60_000);
@@ -20,6 +41,10 @@ export type EventoMonitor =
 
 class Monitor extends EventEmitter {
   private emergencias = new Map<string, Emergencia>();
+  /** Despachos detectados por radio que el SGO aún no publica (id "R…") */
+  private provisionalesMap = new Map<string, Emergencia>();
+  /** Id provisional → parte del SGO, para que los enlaces "R…" sigan funcionando */
+  private alias = new Map<string, string>();
   private actualizado: string | null = null;
   private error: string | null = null;
   private ok = false;
@@ -51,12 +76,64 @@ class Monitor extends EventEmitter {
   }
 
   snapshot(): Snapshot {
-    const emergencias = [...this.emergencias.values()].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.parte.localeCompare(a.parte));
+    const enEmergencia = unidadesEnEmergencia();
+    const conEstado = (e: Emergencia): Emergencia => {
+      if (!enEmergencia.size || !e.activa) return e;
+      const u = e.maquinas.filter((m) => enEmergencia.has(normUnidad(m)));
+      return u.length ? { ...e, unidadesEnEmergencia: u } : e;
+    };
+    const emergencias = [...this.provisionalesMap.values(), ...this.emergencias.values()].map(conEstado).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.parte.localeCompare(a.parte));
     return { actualizado: this.actualizado, ok: this.ok, error: this.error, emergencias };
   }
 
   obtener(parte: string) {
-    return this.emergencias.get(parte) ?? null;
+    const real = this.alias.get(parte) ?? parte;
+    return this.emergencias.get(real) ?? this.provisionalesMap.get(real) ?? null;
+  }
+
+  provisionales(): Emergencia[] {
+    return [...this.provisionalesMap.values()];
+  }
+
+  /** Alta (o actualización) de un despacho detectado por radio. */
+  agregarProvisional(e: Emergencia, nueva: boolean) {
+    // Si el SGO ya la publicó, no se duplica
+    const yaEnSgo = [...this.emergencias.values()].find((x) => mismaEmergencia(e, x));
+    if (yaEnSgo) {
+      this.alias.set(e.parte, yaEnSgo.parte);
+      return;
+    }
+    this.provisionalesMap.set(e.parte, e);
+    this.emitir({ tipo: "snapshot", data: this.snapshot() });
+    if (nueva) {
+      this.emitir({ tipo: "nueva", data: e });
+      notificarEmergencia(e).catch((err) => console.error("[monitor] notificar radio:", err));
+    }
+  }
+
+  /** Une provisionales con las emergencias del SGO; devuelve los partes del SGO que ya se avisaron por radio. */
+  private unirProvisionales(vigentes: Map<string, Emergencia>): Set<string> {
+    const avisadas = new Set<string>();
+    for (const p of [...this.provisionalesMap.values()]) {
+      const e = [...vigentes.values()].find((x) => !x.radio && mismaEmergencia(p, x));
+      if (e) {
+        e.radio = {
+          texto: p.radio?.texto ?? "",
+          selectivas: p.radio?.selectivas ?? [],
+          anticipoSeg: Math.max(0, Math.round((Date.parse(e.vistaEn) - Date.parse(p.vistaEn)) / 1000)),
+          provisional: p.parte,
+        };
+        this.alias.set(p.parte, e.parte);
+        this.provisionalesMap.delete(p.parte);
+        transferirNotificados(p.parte, e.parte);
+        avisadas.add(e.parte);
+        console.log(`[monitor] radio ${p.parte} confirmada como ${e.parte} (+${e.radio.anticipoSeg}s de adelanto)`);
+      } else if (Date.now() - Date.parse(p.fecha) > VIDA_PROVISIONAL_MS) {
+        this.provisionalesMap.delete(p.parte);
+      }
+    }
+    if (this.alias.size > 500) this.alias = new Map([...this.alias].slice(-300));
+    return avisadas;
   }
 
   private emitir(ev: EventoMonitor) {
@@ -75,7 +152,7 @@ class Monitor extends EventEmitter {
 
       for (const base of lista) {
         const previa = this.emergencias.get(base.parte);
-        const e: Emergencia = { ...base, vistaEn: previa?.vistaEn ?? (this.primeraCarga ? base.fecha : ahora) };
+        const e: Emergencia = { ...base, vistaEn: previa?.vistaEn ?? (this.primeraCarga ? base.fecha : ahora), radio: previa?.radio };
         vigentes.set(e.parte, e);
         if (!previa) {
           if (!this.primeraCarga) nuevas.push(e);
@@ -96,6 +173,7 @@ class Monitor extends EventEmitter {
         vigentes.size !== this.emergencias.size ||
         !this.ok;
 
+      const avisadasPorRadio = this.unirProvisionales(vigentes);
       this.emergencias = vigentes;
       this.actualizado = ahora;
       this.ok = true;
@@ -110,7 +188,7 @@ class Monitor extends EventEmitter {
       for (const e of nuevas) {
         this.emitir({ tipo: "nueva", data: e });
         const reciente = Date.now() - new Date(e.fecha).getTime() < VENTANA_NOTIFICACION_MS;
-        if (!resincronizacion && reciente) {
+        if (!resincronizacion && reciente && !avisadasPorRadio.has(e.parte)) {
           notificarEmergencia(e).catch((err) => console.error("[monitor] notificar:", err));
         }
       }
