@@ -34,12 +34,12 @@ async function describirFotoMatpel(imagenDataUrl: string): Promise<string | null
         {
           role: "system",
           content:
-            "Describes fotos para identificar materiales peligrosos. En 2 a 4 líneas di SOLO lo que se ve: número ONU de la placa naranja, número o símbolo de clase del rombo, colores, valores del rombo NFPA (azul/rojo/amarillo/blanco), nombre del producto y textos de la etiqueta. Si algo no se lee, dilo. No adivines.",
+            "Transcribe exactamente los números y textos que se leen en la foto y describe en una línea qué objeto es (placa, etiqueta, envase, vehículo). Menciona solo lo que de verdad aparece; no supongas símbolos, colores ni partes que no se ven. Máximo 3 líneas.",
         },
         {
           role: "user",
           content: [
-            { type: "text", text: "¿Qué se ve en esta foto?" },
+            { type: "text", text: "¿Qué números y textos se leen en esta imagen?" },
             { type: "image_url", image_url: { url: imagenDataUrl } },
           ],
         },
@@ -512,6 +512,14 @@ export async function identificarMatpel(consulta: string, imagenDataUrl?: string
       ];
     }
     r.guia_gre = ref.guia;
+    // El nombre y la clase del N° ONU salen de la tabla: la IA llegó a decir "explosivo" para el 1203 (gasolina)
+    const nombreIA = (r.nombre ?? "").toLowerCase();
+    const coincide = [ref.nombre, ...(ref.alias ?? [])].some((n) => nombreIA.includes(n.toLowerCase()));
+    if (r.nombre && !coincide) {
+      r.advertencias = [`La IA sugirió "${r.nombre}", pero el N° ONU ${ref.onu} corresponde a ${ref.nombre} (tabla de referencia). Verifica la placa.`, ...r.advertencias];
+    }
+    r.nombre = ref.nombre;
+    r.clase = ref.clase;
     r.referencia_local = { onu: ref.onu, nombre: ref.nombre, guia: ref.guia, clase: ref.clase };
   } else {
     r.referencia_local = null;
