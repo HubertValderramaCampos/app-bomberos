@@ -16,6 +16,42 @@ const MODELO_EXPERTO = process.env.OPENAI_MODEL_EXPERTO || "gpt-5.4-mini";
 export const IA_VISION = process.env.IA_VISION !== "0";
 
 export class FotoNoDisponible extends Error {}
+/** Modelo que VE imágenes (en Groq, gpt-oss no acepta imágenes): solo describe la foto; la ficha la arma MODELO_EXPERTO. */
+const MODELO_VISION = process.env.OPENAI_MODEL_VISION || "qwen/qwen3.8-27b";
+
+/**
+ * Paso 1 de MatPel por foto: el modelo de visión describe en texto lo que se ve (probado: lee bien la placa
+ * en texto libre, pero se equivoca al llenar campos estructurados). Devuelve la descripción o null.
+ */
+async function describirFotoMatpel(imagenDataUrl: string): Promise<string | null> {
+  const c = clienteIA();
+  if (!hayCupo("critica")) throw new IANoDisponible("Presupuesto diario sin cupo");
+  try {
+    const r = await c.chat.completions.create({
+      model: MODELO_VISION,
+      max_tokens: 600,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Describes fotos para identificar materiales peligrosos. En 2 a 4 líneas di SOLO lo que se ve: número ONU de la placa naranja, número o símbolo de clase del rombo, colores, valores del rombo NFPA (azul/rojo/amarillo/blanco), nombre del producto y textos de la etiqueta. Si algo no se lee, dilo. No adivines.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "¿Qué se ve en esta foto?" },
+            { type: "image_url", image_url: { url: imagenDataUrl } },
+          ],
+        },
+      ],
+    });
+    registrarConsumo(r.usage?.total_tokens);
+    const txt = (r.choices[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    return txt || null;
+  } catch (err) {
+    registrarErrorIA(err);
+  }
+}
 
 export const CONTEXTO = `Apoyas a bomberos voluntarios del Cuerpo General de Bomberos Voluntarios del Perú (CGBVP).
 Usa español del Perú y terminología del CGBVP: compañía (B-xxx), unidad/máquina, Central de Emergencias, al mando,
@@ -442,15 +478,19 @@ export async function identificarMatpel(consulta: string, imagenDataUrl?: string
     if (!consulta?.trim()) throw new FotoNoDisponible("La identificación por foto no está disponible");
     imagenDataUrl = null; // hay texto: se responde con eso
   }
-  const partes: OpenAI.Chat.ChatCompletionContentPart[] = [
-    {
-      type: "text",
-      text: consulta?.trim()
-        ? `Consulta del bombero: ${consulta.trim()}`
-        : "Identifica el material peligroso en la imagen.",
-    },
-  ];
-  if (imagenDataUrl) partes.push({ type: "image_url", image_url: { url: imagenDataUrl, detail: "high" } });
+  // Foto: el modelo de visión la describe y esa descripción entra como texto al análisis experto
+  let observado: string | null = null;
+  if (imagenDataUrl) {
+    observado = await describirFotoMatpel(imagenDataUrl);
+    if (!observado && !consulta?.trim()) throw new FotoNoDisponible("No se pudo leer la foto. Escribe el N° ONU o el nombre.");
+  }
+  const texto = [
+    consulta?.trim() ? `Consulta del bombero: ${consulta.trim()}` : "",
+    observado ? `Observado en la foto (descripción automática, puede tener errores): ${observado}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const partes: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: "text", text: texto || "Identifica el material peligroso." }];
 
   const r = await completarJSON<MatpelResultado>({
     modelo: MODELO_EXPERTO,
@@ -462,6 +502,7 @@ export async function identificarMatpel(consulta: string, imagenDataUrl?: string
     usuario: partes,
   });
 
+  if (observado) r.observaciones_imagen = observado;
   const ref = buscarPorOnu(r.numero_onu);
   if (ref) {
     if (r.guia_gre && r.guia_gre.toUpperCase() !== ref.guia.toUpperCase()) {
