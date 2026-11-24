@@ -3,6 +3,7 @@ import type { Emergencia, Snapshot } from "@/lib/types";
 import { obtenerEmergencias, pausarSgo, SgoBloqueado } from "./sgo";
 import { notificarEmergencia, transferirNotificados } from "./push";
 import { normUnidad, unidadesEnEmergencia } from "./unidades";
+import { guardar, leer } from "./store";
 
 /** Una provisional por radio se une con la del SGO si este la despacha dentro de esta ventana. */
 const UNIR_ANTES_MS = 5 * 60_000;
@@ -60,6 +61,20 @@ class Monitor extends EventEmitter {
     super();
     this.setMaxListeners(0);
     this.listo = new Promise((r) => (this.resolverListo = r));
+    // Al reiniciar (p. ej. tras un deploy) se muestra la última lista guardada mientras llega la nueva,
+    // y si el SGO nos tenía limitados no se le vuelve a consultar antes de tiempo (eso alarga el bloqueo).
+    const previo = leer<Snapshot | null>("snapshot_sgo", null);
+    if (previo?.emergencias?.length) {
+      for (const e of previo.emergencias) if (e.fuente !== "radio") this.emergencias.set(e.parte, e);
+      this.actualizado = previo.actualizado;
+      this.ok = false;
+      this.error = "Mostrando la última lista guardada";
+    }
+    const bloqueoHasta = leer<number>("sgo_bloqueo_hasta", 0);
+    if (bloqueoHasta > Date.now()) {
+      this.esperarHasta = bloqueoHasta;
+      pausarSgo(bloqueoHasta);
+    }
   }
 
   iniciar() {
@@ -181,6 +196,8 @@ class Monitor extends EventEmitter {
       this.fallosSeguidos = 0;
       this.esperarHasta = 0;
 
+      guardar("snapshot_sgo", { actualizado: ahora, ok: true, error: null, emergencias: [...vigentes.values()] });
+      guardar("sgo_bloqueo_hasta", 0);
       if (huboCambios) this.emitir({ tipo: "snapshot", data: this.snapshot() });
       else this.emitir({ tipo: "estado", data: { actualizado: ahora, ok: true, error: null } });
 
@@ -208,7 +225,10 @@ class Monitor extends EventEmitter {
       const base = bloqueado ? 10 * 60_000 : POLL_MS;
       const espera = Math.min(ESPERA_MAX_MS, base * 2 ** Math.min(this.fallosSeguidos - 1, 5));
       this.esperarHasta = Date.now() + espera;
-      if (bloqueado) pausarSgo(this.esperarHasta);
+      if (bloqueado) {
+        pausarSgo(this.esperarHasta);
+        guardar("sgo_bloqueo_hasta", this.esperarHasta);
+      }
       this.error = `${(err as Error).message}. Reintento en ${Math.round(espera / 60_000) || 1} min.`;
       console.error("[monitor] error consultando SGO:", this.error);
       this.emitir({ tipo: "estado", data: { actualizado: this.actualizado, ok: false, error: this.error } });
