@@ -1,5 +1,18 @@
 import type { Emergencia, Transmision } from "@/lib/types";
 import { clasificar, companiaDeUnidad } from "@/lib/categorias";
+import { CLAVES } from "@/lib/claves";
+
+/** Claves de identificación de emergencias (serie 20): el tipo sale exacto de la tabla oficial, sin IA. */
+const CLAVES_TIPO = new Map(CLAVES.filter((c) => c.codigo.startsWith("20-")).map((c) => [c.codigo, c.significado]));
+function tipoPorClave(texto: string): string | null {
+  for (const m of texto.matchAll(/\b20[-\s.]?(\d{2})\b/g)) {
+    const s = CLAVES_TIPO.get(`20-${m[1]}`);
+    if (s) return s.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+  return null;
+}
+/** "M20-12", "10-25"… son claves que la IA a veces toma por unidades. */
+const esClave = (u: string) => /^(M|MAQ)?-?(10|20|30)-\d{2}$/i.test(u.replace(/\s/g, ""));
 import { completarJSON, MODELO_RAPIDO } from "../ia";
 import { getMonitor } from "../monitor";
 import { getSelectivas } from "./selectivas";
@@ -45,6 +58,8 @@ const SCHEMA = {
 };
 
 const SISTEMA = `Analizas transcripciones automáticas (pueden tener errores) de la radio de la Central de Emergencias del CGBVP (Lima, Perú).
+Los números con forma 10-xx, 20-xx o 30-xx son CLAVES, nunca unidades. La serie 20 dice el tipo de emergencia:
+${[...CLAVES_TIPO].map(([c, s]) => `${c} ${s}`).join("; ")}.
 Un DESPACHO típico: "Atención, máquina 121, máquina 134-1, ambulancia 105, comisión de rescate e incendio. Avenida Villa del Mar cruce ruta E, Villa El Salvador".
 Devuelve es_despacho=false si es otra cosa (confirmaciones "10-05", pedidos de unidades en curso, conversación).
 Normaliza unidades: "máquina 134-1"→"M134-1", "máquina 61"→"M61-1"... solo si hay número; "ambulancia 105"→"AMB-105"; "rescate 2"→"RES-2".
@@ -89,6 +104,10 @@ class Despachos {
       prioridad: "critica",
     });
     if (!x.es_despacho || (!x.direccion && !x.distrito && !x.unidades.length)) return;
+    x.unidades = x.unidades.filter((u) => !esClave(u));
+    // La clave 20-xx dicha por la Central define el tipo con exactitud (manda sobre lo que deduzca la IA)
+    const porClave = tipoPorClave(tx.texto);
+    if (porClave) x.tipo = porClave;
 
     // Compañía exacta por selectiva (par de tonos decodificado)
     const selectivas = getSelectivas()

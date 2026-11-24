@@ -39,6 +39,10 @@ export const ciaDeNumero = (n: number) => `B-${n}`;
  * pares confirmados y contra las máquinas que la Central nombra justo después de cada selectiva):
  *  - B-1 … B-99   → grupo 2: "2-(15+decena)/2-(15+unidad)"   p. ej. B-83 = 2-23/2-18
  *  - B-100 … B-199 → grupo 1: "1-(11+decena)/1-(1+unidad)"   p. ej. B-150 = 1-16/1-1
+ * Excepción descubierta con datos: un par NUNCA repite el mismo tono. En el grupo 2, si decena y unidad
+ * son iguales (B-11, B-22…), el segundo tono pasa al siguiente: B-11 suena 2-16/2-17 (confirmado: en 13
+ * selectivas, la Central nombró la máquina 11 y nunca la 12). Esos casos van en PARES_CONFIRMADOS y el
+ * sistema aprende el resto por correlación (ver selectivas.ts).
  * Devuelve null si el par no sigue el esquema (otro grupo o tono fuera de rango).
  */
 export function ciaDePar(par: string): string | null {
@@ -71,6 +75,8 @@ export function parDeCia(n: number): string | null {
 }
 
 export const PARES_CONFIRMADOS: Record<string, string> = {
+  // Tono repetido (decena = unidad): 2-16/2-16 no existe, suena 2-16/2-17
+  "2-16/2-17": "B-11",
   "2-15/2-17": "B-2",
   "2-15/2-18": "B-3",
   "2-15/2-19": "B-4",

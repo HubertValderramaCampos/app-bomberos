@@ -167,10 +167,15 @@ class Selectivas extends EventEmitter {
     const fija = PARES_CONFIRMADOS[par] ?? this.confirmadosFuente()[par];
     if (fija) return { cia: fija, origen: "confirmada", confianza: 1 };
     if (r?.ciaFuente && r.origenFuente === "confirmado") return { cia: r.ciaFuente, origen: "confirmada", confianza: 1 };
-    // El par codifica el número de compañía: identificación exacta sin necesidad de aprender
-    const decodificada = ciaDePar(par);
-    if (decodificada) return { cia: decodificada, origen: "confirmada", confianza: 1 };
     const d = leer<Record<string, Deduccion>>("pares_deducidos", {})[par];
+    // Lo APRENDIDO de la radio manda sobre la fórmula cuando la evidencia es fuerte y la contradice
+    // (así se descubrió que 2-16/2-17 es la B-11 y no la B-12).
+    const decodificada = ciaDePar(par);
+    if (d && d.cia !== decodificada && d.coincidencias >= 4 && d.confianza >= 0.5) {
+      return { cia: d.cia, origen: "confirmada", confianza: d.confianza };
+    }
+    // El par codifica el número de compañía: identificación exacta sin necesidad de aprender
+    if (decodificada) return { cia: decodificada, origen: "confirmada", confianza: 1 };
     if (d) return { cia: d.cia, origen: "inferida", confianza: d.confianza };
     // El detector de origen a veces propone una compañía sin confirmar
     if (r?.ciaFuente) return { cia: r.ciaFuente, origen: "inferida", confianza: 0.5 };
