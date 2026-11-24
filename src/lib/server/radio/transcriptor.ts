@@ -58,7 +58,7 @@ const MODELO_RESPALDO = process.env.RADIO_MODELO_RESPALDO || "whisper-large-v3-t
 const ALUCINACIONES =
   /amara\.org|subt[ií]tul|gracias por ver|suscr[ií]b|www\.|\.com\b|cinematograf|nuestro canal|qu[eé] es (la vida|el video)|sigue viviendo|^\W*$/i;
 /** Frases cortas TODO EN MAYÚSCULAS ("SIN CENTRALES"): típico invento de Whisper sobre ruido de radio. */
-const esMayusculasInventadas = (t: string) => !/\d/.test(t) && /^[^a-záéíóúñ]+$/.test(t) && /[A-ZÁÉÍÓÚÑ]{3}/.test(t) && t.split(/\s+/).length <= 4;
+const esMayusculasInventadas = (t: string) => !/\d/.test(t) && /^[^a-záéíóúñ]+$/.test(t) && /[A-ZÁÉÍÓÚÑ]{3}/.test(t) && t.split(/\s+/).length <= 7;
 
 interface Segmento {
   ini: number; // epoch s (reloj del receptor)
