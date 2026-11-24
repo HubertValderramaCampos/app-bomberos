@@ -51,7 +51,7 @@ export function DetalleEmergencia({ parte }: { parte: string }) {
         {noEncontrada ? (
           <div className="rounded-xl border border-line bg-surface p-8 text-center">
             <p className="font-display text-xl font-bold uppercase">Parte {parte}</p>
-            <p className="mt-2 text-sm text-muted">La emergencia ya no figura en el SGO (más de 24 horas) o el número es incorrecto.</p>
+            <p className="mt-2 text-sm text-muted">Ya no figura en el SGO</p>
           </div>
         ) : (
           <div className="h-64 animate-pulse rounded-xl border border-line bg-surface" />
@@ -90,105 +90,79 @@ export function DetalleEmergencia({ parte }: { parte: string }) {
     if (!radio.reproduciendo) radio.alternar();
   };
 
+  const urlBuscar = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${e.direccion}, ${e.distrito}, Perú`)}`;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Volver />
 
-      {/* Cabecera */}
-      <header className="relative overflow-hidden rounded-2xl border border-line bg-surface">
-        <div className="h-1.5" style={{ background: cat.color }} />
-        <div className="p-4">
-          <div className="flex items-start gap-3">
-            <span
-              className="grid size-12 shrink-0 place-items-center rounded-xl"
-              style={{ background: `color-mix(in oklab, ${cat.color} 18%, transparent)`, color: cat.color }}
-            >
-              <IconoCategoria categoria={e.categoria} className="size-6" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <EstadoBadge estado={e.estado} activa={e.activa} />
-                <span className="font-mono text-xs text-dim">Parte {e.parte}</span>
-              </div>
-              <h1 className="mt-1 font-display text-[28px] font-bold uppercase leading-none tracking-wide">{e.tipoPrincipal}</h1>
-              {e.subtipo && <p className="mt-1 text-[15px] text-muted">{e.subtipo}</p>}
-            </div>
+      {/* Cabecera: qué, dónde, cuánto tiempo */}
+      <header className="relative overflow-hidden rounded-2xl border border-line bg-surface p-4 pl-5">
+        <span className="absolute inset-y-0 left-0 w-1.5" style={{ background: cat.color }} />
+        <div className="flex items-start gap-3">
+          <span
+            className="grid size-11 shrink-0 place-items-center rounded-xl"
+            style={{ background: `color-mix(in oklab, ${cat.color} 18%, transparent)`, color: cat.color }}
+          >
+            <IconoCategoria categoria={e.categoria} className="size-6" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <EstadoBadge estado={e.estado} activa={e.activa} />
+            <h1 className="mt-1 font-display text-[26px] font-bold uppercase leading-none tracking-wide">{e.tipoPrincipal}</h1>
+            {e.subtipo && <p className="mt-0.5 text-sm text-muted">{e.subtipo}</p>}
           </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <Dato icono={<Clock className="size-4" />} etiqueta="Despacho" valor={fechaHoraLima(e.fecha)} />
-            <Dato
-              icono={<Clock className="size-4" />}
-              etiqueta={e.activa ? "Transcurrido" : "Registrado"}
-              valor={e.activa ? cronometro(e.fecha, ahora) : hace(e.fecha, ahora)}
-              mono
-            />
-            {km != null && <Dato icono={<Navigation className="size-4" />} etiqueta="Distancia" valor={formatoDistancia(km)} />}
+          <div className="shrink-0 text-right">
+            <p className={`font-mono text-xl font-semibold leading-none tabular ${e.activa ? "text-accent-strong" : "text-muted"}`}>
+              {e.activa ? cronometro(e.fecha, ahora) : hace(e.fecha, ahora)}
+            </p>
+            {km != null && <p className="mt-1 text-sm font-semibold tabular">{formatoDistancia(km)}</p>}
           </div>
         </div>
+
+        <button
+          onClick={async () => {
+            await navigator.clipboard.writeText(`${e.direccion}, ${e.distrito}`);
+            setCopiado(true);
+            setTimeout(() => setCopiado(false), 2000);
+          }}
+          className="pulsar mt-3 flex w-full items-start gap-2 rounded-xl bg-surface-2 px-3 py-2.5 text-left"
+          aria-label="Copiar dirección"
+        >
+          <MapPin className="mt-0.5 size-4 shrink-0 text-accent-strong" />
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold leading-snug">{e.direccion || "Sin dirección"}</span>
+            <span className="block text-sm text-muted">{e.distrito}</span>
+          </span>
+          {copiado ? <Check className="mt-0.5 size-4 text-ok" /> : <Copy className="mt-0.5 size-4 text-dim" />}
+        </button>
+
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-dim">
+          <Clock className="size-3.5" /> {fechaHoraLima(e.fecha)} · Parte {e.parte}
+        </p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <div className="space-y-4">
-          {/* Ubicación */}
-          <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-            {tieneCoords ? (
-              <div className="h-56">
-                <MapaDinamico emergencias={[e]} ubicacion={ubicacion} centro={[e.lat!, e.lng!]} zoom={15} seleccion={e.parte} />
-              </div>
-            ) : (
-              <div className="grid h-24 place-items-center bg-surface-2 text-sm text-dim">Sin georreferencia en el SGO</div>
-            )}
-            <div className="p-4">
-              <div className="flex items-start gap-2">
-                <MapPin className="mt-0.5 size-4 shrink-0 text-dim" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold">{e.direccion || "Dirección no registrada"}</p>
-                  <p className="text-sm text-muted">{e.distrito}</p>
-                </div>
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(`${e.direccion}, ${e.distrito}`);
-                    setCopiado(true);
-                    setTimeout(() => setCopiado(false), 2000);
-                  }}
-                  className="rounded-lg p-2 text-dim hover:bg-surface-2 hover:text-text"
-                  aria-label="Copiar dirección"
-                >
-                  {copiado ? <Check className="size-4 text-ok" /> : <Copy className="size-4" />}
-                </button>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {tieneCoords ? (
-                  <>
-                    <a href={urlGoogleMaps(e.lat!, e.lng!)} target="_blank" rel="noopener" className="flex h-11 items-center justify-center gap-2 rounded-xl bg-accent font-semibold text-white active:scale-[0.98]">
-                      <Navigation className="size-4" /> Google Maps
-                    </a>
-                    <a href={urlWaze(e.lat!, e.lng!)} target="_blank" rel="noopener" className="flex h-11 items-center justify-center gap-2 rounded-xl bg-surface-3 font-semibold active:scale-[0.98]">
-                      <Navigation className="size-4" /> Waze
-                    </a>
-                  </>
-                ) : (
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${e.direccion}, ${e.distrito}, Perú`)}`}
-                    target="_blank"
-                    rel="noopener"
-                    className="col-span-2 flex h-11 items-center justify-center gap-2 rounded-xl bg-surface-3 font-semibold"
-                  >
-                    <MapPin className="size-4" /> Buscar dirección en Google Maps
-                  </a>
-                )}
-              </div>
-            </div>
-          </section>
+      {/* Acciones rápidas */}
+      <div className="grid grid-cols-4 gap-2">
+        <Accion href={tieneCoords ? urlGoogleMaps(e.lat!, e.lng!) : urlBuscar} icono={<Navigation className="size-5" />} texto="Maps" principal />
+        {tieneCoords ? (
+          <Accion href={urlWaze(e.lat!, e.lng!)} icono={<Navigation className="size-5" />} texto="Waze" />
+        ) : (
+          <Accion icono={<Navigation className="size-5" />} texto="Waze" deshabilitado />
+        )}
+        <Accion onClick={escucharRadio} icono={<Radio className="size-5" />} texto="Radio" />
+        <Accion onClick={compartir} icono={copiado ? <Check className="size-5 text-ok" /> : <Share2 className="size-5" />} texto="Enviar" />
+      </div>
 
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <div className="space-y-3">
           {/* Unidades */}
-          <section className="rounded-2xl border border-line bg-surface p-4">
+          <section className="rounded-2xl border border-line bg-surface p-3.5">
             <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
-              <Truck className="size-4" /> Unidades despachadas
+              <Truck className="size-4" /> Unidades
+              {e.companias.length > 0 && <span className="ml-auto normal-case tracking-normal">{e.companias.map((c) => `B-${c}`).join(" · ")}</span>}
             </h2>
             {e.maquinas.length ? (
-              <div className="mt-2.5 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {e.maquinas.map((m) => (
                   <span key={m} className="rounded-lg border border-line-strong bg-surface-2 px-2.5 py-1 font-mono text-sm font-semibold">
                     {m}
@@ -196,36 +170,23 @@ export function DetalleEmergencia({ parte }: { parte: string }) {
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-muted">Aún no hay unidades registradas.</p>
+              <p className="mt-2 text-sm text-muted">Sin unidades aún</p>
             )}
             {unidades.length > 0 && (
-              <ul className="mt-3 divide-y divide-line border-t border-line">
-                {unidades.map((u) => (
-                  <li key={u.codigo + u.tipo} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-text/85">{u.tipo}</span>
-                    <span className="font-semibold tabular">{u.cantidad}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {e.companias.length > 0 && (
-              <p className="mt-2 text-xs text-dim">Compañías: {e.companias.map((c) => `B-${c}`).join(", ")}</p>
+              <p className="mt-2 text-xs text-muted">{unidades.map((u) => `${u.cantidad} ${u.tipo}`).join(" · ")}</p>
             )}
           </section>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={escucharRadio} className="flex h-12 items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface-2 font-semibold active:scale-[0.98]">
-              <Radio className="size-4" /> Escuchar Central
-            </button>
-            <button onClick={compartir} className="flex h-12 items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface-2 font-semibold active:scale-[0.98]">
-              {copiado ? <Check className="size-4 text-ok" /> : <Share2 className="size-4" />} Compartir
-            </button>
-          </div>
+          {tieneCoords && (
+            <section className="h-52 overflow-hidden rounded-2xl border border-line">
+              <MapaDinamico emergencias={[e]} ubicacion={ubicacion} centro={[e.lat!, e.lng!]} zoom={15} seleccion={e.parte} />
+            </section>
+          )}
         </div>
 
-        <div className="space-y-4">
-          <PanelRadio parte={e.parte} />
+        <div className="space-y-3">
           <PanelBriefing parte={e.parte} clave={`${e.tipo}|${e.maquinas.length}`} />
+          <PanelRadio parte={e.parte} />
         </div>
       </div>
     </div>
@@ -234,20 +195,42 @@ export function DetalleEmergencia({ parte }: { parte: string }) {
 
 function Volver() {
   return (
-    <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-muted hover:text-text">
-      <ChevronLeft className="size-4" /> Emergencias
+    <Link href="/" className="pulsar -ml-1 inline-flex h-9 items-center gap-0.5 pr-2 text-sm font-semibold text-muted">
+      <ChevronLeft className="size-5" /> Volver
     </Link>
   );
 }
 
-function Dato({ icono, etiqueta, valor, mono }: { icono: React.ReactNode; etiqueta: string; valor: string; mono?: boolean }) {
-  return (
-    <div className="rounded-xl bg-surface-2 px-3 py-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-dim">
+function Accion({
+  href,
+  onClick,
+  icono,
+  texto,
+  principal,
+  deshabilitado,
+}: {
+  href?: string;
+  onClick?: () => void;
+  icono: React.ReactNode;
+  texto: string;
+  principal?: boolean;
+  deshabilitado?: boolean;
+}) {
+  const cls = `pulsar flex h-16 flex-col items-center justify-center gap-1 rounded-2xl text-xs font-semibold ${
+    principal ? "bg-accent text-white" : "border border-line-strong bg-surface-2"
+  } ${deshabilitado ? "pointer-events-none opacity-35" : ""}`;
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener" className={cls}>
         {icono}
-        {etiqueta}
-      </p>
-      <p className={`mt-0.5 text-[15px] font-semibold ${mono ? "font-mono tabular" : ""}`}>{valor}</p>
-    </div>
+        {texto}
+      </a>
+    );
+  }
+  return (
+    <button onClick={onClick} disabled={deshabilitado} className={cls}>
+      {icono}
+      {texto}
+    </button>
   );
 }

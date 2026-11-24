@@ -78,11 +78,10 @@ export default function MatpelPage() {
   }, [filtroTabla]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wide">Materiales peligrosos</h1>
-        <p className="text-xs text-muted">Identificación por N° ONU, nombre, placa, rombo o foto de la etiqueta · Respuesta inicial según GRE</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-4">
+      <h1 className="font-display text-xl font-bold uppercase tracking-wide">
+        MatPel <span className="text-sm font-semibold normal-case tracking-normal text-dim">· N° ONU, nombre o placa</span>
+      </h1>
 
       {/* Consulta */}
       <section className="rounded-2xl border border-line bg-surface p-3">

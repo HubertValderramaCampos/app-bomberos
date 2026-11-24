@@ -42,23 +42,26 @@ export function PanelRadio({ parte }: { parte: string }) {
     <section className="rounded-2xl border border-line bg-surface" aria-label="Radio de la Central">
       <header className="flex items-center gap-2 border-b border-line px-4 py-3">
         <AudioLines className="size-4 text-ok" />
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Radio · lo comunicado</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Radio</h2>
         {txs.length > 0 && <span className="ml-auto text-[11px] text-dim">{txs.length} transmisiones</span>}
       </header>
 
       {!cargado && <div className="m-4 h-16 animate-pulse rounded-lg bg-surface-2" />}
 
       {cargado && txs.length === 0 && (
-        <p className="p-4 text-sm text-muted">
-          Aún no hay comunicaciones de radio vinculadas a esta emergencia. Se transcriben los canales 1 a 4 de la IV Comandancia
-          (Lima Centro); las emergencias de otras zonas no pasan por esta radio.
-        </p>
+        <p className="p-4 text-sm text-muted">Sin comunicaciones de radio aún</p>
       )}
 
       {cargado && !resumen && pendiente && !pendiente.listo && (
-        <p className="border-b border-line px-4 py-3 text-[13px] text-muted">
-          El resumen con IA aparece cuando haya más comunicación por radio ({pendiente.palabras}/{pendiente.minimo} palabras).
-        </p>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 text-[12px] text-dim">
+          <span>Resumen IA</span>
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+            <span className="block h-full bg-ok/70" style={{ width: `${Math.min(100, (pendiente.palabras / pendiente.minimo) * 100)}%` }} />
+          </span>
+          <span className="tabular">
+            {pendiente.palabras}/{pendiente.minimo}
+          </span>
+        </div>
       )}
 
       {resumen && (
@@ -103,7 +106,7 @@ export function PanelRadio({ parte }: { parte: string }) {
               </ul>
             </div>
           )}
-          <p className="text-[11px] text-dim">Resumen con IA de las transcripciones · {horaLima(resumen.generado)}</p>
+          <p className="text-[11px] text-dim">Resumen IA · {horaLima(resumen.generado)}</p>
         </div>
       )}
 
@@ -113,9 +116,7 @@ export function PanelRadio({ parte }: { parte: string }) {
         </div>
       )}
       {txs.length > 0 && (
-        <p className="border-t border-line px-4 py-2.5 text-[11px] leading-relaxed text-dim">
-          Transcripción automática (Whisper): puede confundir números y nombres. Ante la duda, escucha la radio.
-        </p>
+        <p className="border-t border-line px-4 py-2 text-[11px] text-dim">Transcripción automática · puede tener errores</p>
       )}
     </section>
   );

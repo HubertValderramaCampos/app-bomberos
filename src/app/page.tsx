@@ -10,17 +10,18 @@ import { TarjetaEmergencia } from "@/components/TarjetaEmergencia";
 import { PanelSituacion } from "@/components/PanelSituacion";
 import { MapaDinamico } from "@/components/MapaDinamico";
 import { IconoCategoria } from "@/components/IconoCategoria";
+import { Credito } from "@/components/Credito";
 
 type Alcance = "activas" | "todas";
-type Orden = "recientes" | "cercanas";
 
 export default function EnVivo() {
-  const { snapshot, conexion, ubicacion, estadoUbicacion, pedirUbicacion, recientes, distanciaA } = useLive();
+  const { snapshot, ubicacion, estadoUbicacion, pedirUbicacion, recientes, distanciaA } = useLive();
   const ahora = useAhora(10_000);
   const [cat, setCat] = useState<Categoria | null>(null);
   const [alcance, setAlcance] = useState<Alcance>("activas");
-  const [orden, setOrden] = useState<Orden>("recientes");
+  const [cercanas, setCercanas] = useState(false);
   const [vista, setVista] = useState<"lista" | "mapa">("lista");
+  const [buscando, setBuscando] = useState(false);
   const [q, setQ] = useState("");
   const [hover, setHover] = useState<string | null>(null);
 
@@ -40,134 +41,109 @@ export default function EnVivo() {
       l = l.filter((e) => `${e.direccion} ${e.distrito} ${e.tipo} ${e.maquinas.join(" ")} ${e.parte}`.toUpperCase().includes(nq));
     }
     const conKm = l.map((e) => ({ e, km: distanciaA(e) }));
-    if (orden === "cercanas" && ubicacion) {
-      conKm.sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity));
-    }
+    if (cercanas && ubicacion) conKm.sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity));
     return conKm;
-  }, [base, cat, q, orden, ubicacion, distanciaA]);
+  }, [base, cat, q, cercanas, ubicacion, distanciaA]);
 
   const activas = todas.filter((e) => e.activa).length;
   const unidades = todas.filter((e) => e.activa).reduce((s, e) => s + e.maquinas.length, 0);
-  const cercanas = ubicacion ? todas.filter((e) => e.activa && (distanciaA(e) ?? Infinity) <= 5).length : null;
+  const aMano = ubicacion ? todas.filter((e) => e.activa && (distanciaA(e) ?? Infinity) <= 5).length : null;
+
+  const alternarCercanas = () => {
+    if (!cercanas && !ubicacion) pedirUbicacion();
+    setCercanas((v) => !v);
+  };
 
   return (
-    <div className="space-y-4">
-      {/* Estado en vivo + contadores */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="relative flex size-2.5">
-              {conexion === "en_vivo" && snapshot?.ok !== false && <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent-strong opacity-75" />}
-              <span className={`relative inline-flex size-2.5 rounded-full ${conexion === "en_vivo" && snapshot?.ok !== false ? "bg-accent-strong" : "bg-warn"}`} />
-            </span>
-            <h1 className="font-display text-2xl font-bold uppercase tracking-wide">Emergencias en vivo</h1>
-          </div>
-          <p className="mt-0.5 text-xs text-muted">
-            {conexion !== "en_vivo"
-              ? "Conectando con el servidor…"
-              : snapshot?.ok === false
-                ? `${snapshot.error ?? "Fuente SGO sin respuesta"}${snapshot.actualizado ? ` · último dato ${hace(snapshot.actualizado, ahora)}` : ""}`
-                : snapshot?.actualizado
-                  ? `SGO · CGBVP — actualizado ${hace(snapshot.actualizado, ahora)}`
-                  : "Cargando…"}
-          </p>
-        </div>
-        <dl className="grid grid-cols-3 gap-2 text-center sm:flex sm:gap-2">
-          <Kpi valor={activas} etiqueta="Activas" acento />
-          <Kpi valor={unidades} etiqueta="Unidades" />
-          {cercanas != null ? <Kpi valor={cercanas} etiqueta="A ≤ 5 km" /> : <Kpi valor={todas.length} etiqueta="En 24 h" />}
-        </dl>
-      </div>
+    <div className="space-y-3">
+      {snapshot?.ok === false && (
+        <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs font-medium text-warn">
+          Sin datos nuevos del SGO{snapshot.actualizado ? ` · último ${hace(snapshot.actualizado, ahora)}` : ""}
+        </p>
+      )}
+
+      {/* Contadores */}
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        <Kpi valor={activas} etiqueta="Activas" acento />
+        <Kpi valor={unidades} etiqueta="Unidades" />
+        {aMano != null ? <Kpi valor={aMano} etiqueta="A 5 km" /> : <Kpi valor={todas.length} etiqueta="24 h" />}
+      </dl>
 
       <PanelSituacion />
 
-      {estadoUbicacion !== "activa" && (
-        <div className="flex items-center gap-3 rounded-xl border border-dashed border-line-strong bg-surface/60 p-3 text-sm">
-          <LocateFixed className="size-5 shrink-0 text-[#60a5fa]" />
-          <p className="flex-1 text-muted">
-            {estadoUbicacion === "denegada"
-              ? "Ubicación bloqueada. Actívala en los ajustes del navegador para ver distancias."
-              : estadoUbicacion === "no_disponible"
-                ? "No se pudo obtener tu ubicación."
-                : "Activa tu ubicación para ver distancias y ordenar por cercanía."}
-          </p>
-          {(estadoUbicacion === "inactiva" || estadoUbicacion === "no_disponible") && (
-            <button onClick={pedirUbicacion} className="shrink-0 rounded-lg bg-surface-3 px-3 py-1.5 text-sm font-semibold hover:bg-line-strong">
-              Activar
-            </button>
-          )}
-          {estadoUbicacion === "solicitando" && <span className="text-xs text-dim">Buscando…</span>}
-        </div>
-      )}
-
-      {/* Filtros */}
-      <div className="space-y-2.5">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
-          <Chip activo={cat === null} onClick={() => setCat(null)}>
-            Todas <span className="tabular text-dim">{base.length}</span>
+      {/* Filtros: una fila de categorías y una de controles */}
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 no-scrollbar">
+        <Chip activo={cat === null} onClick={() => setCat(null)}>
+          Todas <span className="tabular opacity-60">{base.length}</span>
+        </Chip>
+        {ORDEN_CATEGORIAS.filter((c) => conteos.get(c)).map((c) => (
+          <Chip key={c} activo={cat === c} onClick={() => setCat(cat === c ? null : c)} color={CATEGORIAS[c].color}>
+            <IconoCategoria categoria={c} className="size-3.5" style={{ color: cat === c ? undefined : CATEGORIAS[c].color }} />
+            {CATEGORIAS[c].corto} <span className="tabular opacity-60">{conteos.get(c)}</span>
           </Chip>
-          {ORDEN_CATEGORIAS.filter((c) => conteos.get(c)).map((c) => (
-            <Chip key={c} activo={cat === c} onClick={() => setCat(cat === c ? null : c)} color={CATEGORIAS[c].color}>
-              <IconoCategoria categoria={c} className="size-3.5" style={{ color: CATEGORIAS[c].color }} />
-              {CATEGORIAS[c].corto} <span className="tabular text-dim">{conteos.get(c)}</span>
-            </Chip>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        ))}
+      </div>
+
+      {buscando ? (
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-dim" />
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Distrito, calle o unidad"
+            className="h-10 w-full rounded-xl border border-line bg-surface pl-9 pr-10 text-[15px] placeholder:text-dim focus:border-line-strong focus:outline-none"
+          />
+          <button
+            onClick={() => {
+              setQ("");
+              setBuscando(false);
+            }}
+            className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center text-dim"
+            aria-label="Cerrar búsqueda"
+          >
+            <X className="size-4" />
+          </button>
+        </label>
+      ) : (
+        <div className="flex items-center gap-2">
           <Segmento
             valor={alcance}
             onChange={(v) => setAlcance(v as Alcance)}
             opciones={[
               { v: "activas", t: "Activas" },
-              { v: "todas", t: "Últimas 24 h" },
+              { v: "todas", t: "24 h" },
             ]}
           />
-          <Segmento
-            valor={orden}
-            onChange={(v) => {
-              if (v === "cercanas" && !ubicacion) pedirUbicacion();
-              setOrden(v as Orden);
-            }}
-            opciones={[
-              { v: "recientes", t: "Recientes" },
-              { v: "cercanas", t: "Cercanas" },
-            ]}
-          />
-          <label className="relative ml-auto min-w-[180px] flex-1 sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-dim" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Distrito, dirección o unidad"
-              className="h-9 w-full rounded-lg border border-line bg-surface pl-8 pr-8 text-sm placeholder:text-dim focus:border-line-strong focus:outline-none"
-            />
-            {q && (
-              <button onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-dim" aria-label="Limpiar búsqueda">
-                <X className="size-4" />
-              </button>
-            )}
-          </label>
-          <div className="lg:hidden">
-            <Segmento
-              valor={vista}
-              onChange={(v) => setVista(v as "lista" | "mapa")}
-              opciones={[
-                { v: "lista", t: <List className="size-4" aria-label="Lista" /> },
-                { v: "mapa", t: <MapIcon className="size-4" aria-label="Mapa" /> },
-              ]}
-            />
+          <div className="ml-auto flex gap-2">
+            <BotonIcono on={cercanas && !!ubicacion} onClick={alternarCercanas} etiqueta="Ordenar por cercanía" ocupado={estadoUbicacion === "solicitando"}>
+              <LocateFixed className="size-[18px]" />
+            </BotonIcono>
+            <BotonIcono onClick={() => setBuscando(true)} etiqueta="Buscar">
+              <Search className="size-[18px]" />
+            </BotonIcono>
+            <span className="lg:hidden">
+              <BotonIcono
+                on={vista === "mapa"}
+                onClick={() => setVista(vista === "lista" ? "mapa" : "lista")}
+                etiqueta={vista === "lista" ? "Ver mapa" : "Ver lista"}
+              >
+                {vista === "lista" ? <MapIcon className="size-[18px]" /> : <List className="size-[18px]" />}
+              </BotonIcono>
+            </span>
           </div>
         </div>
-      </div>
+      )}
+      {cercanas && estadoUbicacion === "denegada" && <p className="text-xs text-warn">Ubicación bloqueada en los ajustes del teléfono.</p>}
 
       {/* Lista + mapa */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
         <div className={`space-y-2 ${vista === "mapa" ? "hidden lg:block" : ""}`}>
           {!snapshot &&
-            Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-[104px] animate-pulse rounded-xl border border-line bg-surface" />)}
+            Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-[96px] animate-pulse rounded-xl border border-line bg-surface" />)}
           {snapshot && lista.length === 0 && (
             <div className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-muted">
-              {q || cat ? "Sin resultados con estos filtros." : alcance === "activas" ? "No hay emergencias activas en este momento." : "Sin emergencias registradas."}
+              {q || cat ? "Sin resultados" : alcance === "activas" ? "Sin emergencias activas" : "Sin emergencias"}
             </div>
           )}
           {lista.map(({ e, km }) => (
@@ -175,24 +151,22 @@ export default function EnVivo() {
           ))}
         </div>
         <div className={`${vista === "lista" ? "hidden lg:block" : ""}`}>
-          <div className="h-[calc(100dvh-260px)] min-h-[420px] overflow-hidden rounded-xl border border-line lg:sticky lg:top-[72px] lg:h-[calc(100dvh-96px)]">
+          <div className="h-[calc(100dvh-280px)] min-h-[380px] overflow-hidden rounded-xl border border-line lg:sticky lg:top-[64px] lg:h-[calc(100dvh-88px)]">
             <MapaDinamico emergencias={lista.map((x) => x.e)} ubicacion={ubicacion} seleccion={hover} ajustar={!ubicacion} />
           </div>
         </div>
       </div>
 
-      <p className="pt-2 text-center text-[11px] leading-relaxed text-dim">
-        App independiente; no es un canal oficial del CGBVP. Datos: SGO público del CGBVP (emergencias de las últimas 24 h).
-      </p>
+      <Credito className="pt-3" />
     </div>
   );
 }
 
 function Kpi({ valor, etiqueta, acento }: { valor: number; etiqueta: string; acento?: boolean }) {
   return (
-    <div className="min-w-[78px] rounded-xl border border-line bg-surface px-3 py-1.5">
-      <dd className={`font-display text-2xl font-bold leading-none tabular ${acento ? "text-accent-strong" : ""}`}>{valor}</dd>
-      <dt className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-dim">{etiqueta}</dt>
+    <div className="rounded-xl border border-line bg-surface py-2">
+      <dd className={`font-display text-[26px] font-bold leading-none tabular ${acento ? "text-accent-strong" : ""}`}>{valor}</dd>
+      <dt className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-dim">{etiqueta}</dt>
     </div>
   );
 }
@@ -201,8 +175,8 @@ function Chip({ activo, onClick, children, color }: { activo: boolean; onClick: 
   return (
     <button
       onClick={onClick}
-      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-        activo ? "border-transparent bg-text text-bg [&_.text-dim]:text-bg/60" : "border-line bg-surface text-text/85 hover:border-line-strong"
+      className={`pulsar flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-semibold ${
+        activo ? "border-transparent bg-text text-bg" : "border-line bg-surface text-text/85"
       }`}
       style={activo && color ? { background: color, color: "#0b0d11" } : undefined}
       aria-pressed={activo}
@@ -212,14 +186,28 @@ function Chip({ activo, onClick, children, color }: { activo: boolean; onClick: 
   );
 }
 
+function BotonIcono({ on, onClick, etiqueta, ocupado, children }: { on?: boolean; onClick: () => void; etiqueta: string; ocupado?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={etiqueta}
+      aria-pressed={on}
+      title={etiqueta}
+      className={`pulsar grid size-10 place-items-center rounded-xl border ${on ? "border-transparent bg-accent text-white" : "border-line bg-surface text-muted"} ${ocupado ? "animate-pulse" : ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function Segmento({ valor, onChange, opciones }: { valor: string; onChange: (v: string) => void; opciones: { v: string; t: React.ReactNode }[] }) {
   return (
-    <div className="inline-flex rounded-lg border border-line bg-surface p-0.5" role="group">
+    <div className="inline-flex rounded-xl border border-line bg-surface p-0.5" role="group">
       {opciones.map((o) => (
         <button
           key={o.v}
           onClick={() => onChange(o.v)}
-          className={`flex h-8 items-center rounded-md px-3 text-[13px] font-medium transition-colors ${valor === o.v ? "bg-surface-3 text-text" : "text-muted hover:text-text"}`}
+          className={`flex h-9 items-center rounded-[10px] px-4 text-[13px] font-semibold ${valor === o.v ? "bg-surface-3 text-text" : "text-dim"}`}
           aria-pressed={valor === o.v}
         >
           {o.t}

@@ -10,6 +10,7 @@ import { TablaEstaciones } from "@/components/TablaEstaciones";
 import { CANALES, hablando, useRadio } from "@/components/providers/RadioProvider";
 import { useAhora, useLive } from "@/components/providers/LiveProvider";
 import { BarrasVoz } from "@/components/BarrasVoz";
+import { Credito } from "@/components/Credito";
 import { hace, horaLima } from "@/lib/tiempo";
 
 export default function RadioPage() {
@@ -33,11 +34,10 @@ export default function RadioPage() {
   const miCia = prefs.compania ? `B-${prefs.compania}` : null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wide">Radio en vivo</h1>
-        <p className="text-xs text-muted">Central de Emergencias · IV Comandancia Departamental Lima Centro</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-4">
+      <h1 className="font-display text-xl font-bold uppercase tracking-wide">
+        Radio <span className="text-sm font-semibold normal-case tracking-normal text-dim">· IV CD Lima Centro</span>
+      </h1>
 
       {/* Reproductor principal */}
       <section className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-b from-surface-2 to-surface p-6 text-center">
@@ -158,9 +158,7 @@ export default function RadioPage() {
               <ListaTransmisiones items={visibles.slice(0, 80)} />
             </div>
           )}
-          <p className="border-t border-line px-4 py-2.5 text-[11px] leading-relaxed text-dim">
-            Transcripción automática: puede confundir números, claves y nombres. Funciona aunque nadie tenga la radio abierta.
-          </p>
+          <p className="border-t border-line px-4 py-2 text-[11px] text-dim">Transcripción automática · puede tener errores</p>
         </section>
       )}
 
@@ -206,21 +204,19 @@ export default function RadioPage() {
             })}
           </ul>
         )}
-        <p className="border-t border-line px-4 py-2.5 text-[11px] leading-relaxed text-dim">
-          La selectiva es el par de tonos con el que la Central llama a una estación. Los pares desconocidos se aprenden solos
-          cruzándolos con los partes del SGO y las transmisiones. Configura tu compañía en{" "}
-          <Link href="/alertas" className="text-muted underline">Alertas</Link> para recibir un aviso cuando la llamen.
-        </p>
+        {!miCia && (
+          <Link href="/alertas" className="block border-t border-line px-4 py-2 text-[11px] text-muted">
+            Configura tu compañía para recibir aviso →
+          </Link>
+        )}
       </section>
 
       <TablaEstaciones pares={r.pares} />
 
       <ReferenciaClaves />
 
-      <p className="text-center text-[11px] leading-relaxed text-dim">
-        Audio: Radio Bomberos Lima · IV CDLC (radio.lenznetwork.com). Cobertura principal: Lima Centro. La radio sigue sonando al
-        cambiar de pantalla y desde la pantalla de bloqueo.
-      </p>
+      <p className="text-center text-[11px] text-dim">Audio: Radio Bomberos Lima · IV CDLC</p>
+      <Credito />
     </div>
   );
 }

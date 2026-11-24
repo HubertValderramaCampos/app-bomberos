@@ -33,7 +33,8 @@
 :root {
   color-scheme: dark;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --nav-h: 64px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --nav-h: 60px;
 }
 
 html,
@@ -42,10 +43,42 @@ body {
   color: var(--color-text);
 }
 
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  display: none;
+}
+
 body {
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  /* Sensación de app nativa: sin selección accidental ni menú "copiar" al mantener pulsado */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-text-size-adjust: 100%;
+}
+input,
+textarea,
+.seleccionable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+a,
+button {
+  touch-action: manipulation;
+}
+img {
+  -webkit-user-drag: none;
+}
+/* Respuesta táctil al pulsar, como un botón nativo */
+.pulsar {
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+.pulsar:active {
+  transform: scale(0.97);
 }
 
 ::selection {

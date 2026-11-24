@@ -16,7 +16,7 @@ const NIVEL = {
 export function PanelSituacion() {
   const { snapshot } = useLive();
   const [s, setS] = useState<Situacion | null>(null);
-  const [abierto, setAbierto] = useState(true);
+  const [abierto, setAbierto] = useState(false);
   const ultimaClave = useRef<string>("");
   const ultimaCarga = useRef(0);
 
@@ -38,27 +38,20 @@ export function PanelSituacion() {
   }, [clave, snapshot]);
 
   if (!s) {
-    return <div className="h-[92px] animate-pulse rounded-xl border border-line bg-surface" aria-hidden />;
+    return <div className="h-[52px] animate-pulse rounded-xl border border-line bg-surface" aria-hidden />;
   }
   const nivel = NIVEL[s.nivel] ?? NIVEL.normal;
 
   return (
-    <section className="rounded-xl border border-line bg-gradient-to-b from-surface-2 to-surface p-3.5" aria-label="Situación operativa">
-      <button onClick={() => setAbierto((v) => !v)} className="flex w-full items-start gap-3 text-left">
-        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent-strong">
-          <Sparkles className="size-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
-            Situación operativa
-            <span className={`rounded-full px-2 py-px text-[10px] font-bold tracking-wide ${nivel.cls}`}>{nivel.txt}</span>
-          </span>
-          <span className="mt-0.5 block font-display text-lg font-semibold leading-snug">{s.titular}</span>
-        </span>
-        <ChevronDown className={`mt-1 size-4 shrink-0 text-dim transition-transform ${abierto ? "rotate-180" : ""}`} />
+    <section className="rounded-xl border border-line bg-surface px-3 py-2.5" aria-label="Situación operativa">
+      <button onClick={() => setAbierto((v) => !v)} className="flex w-full items-center gap-2.5 text-left" aria-expanded={abierto}>
+        <Sparkles className="size-4 shrink-0 text-accent-strong" />
+        <span className={`shrink-0 rounded-full px-2 py-px text-[10px] font-bold uppercase tracking-wide ${nivel.cls}`}>{nivel.txt}</span>
+        <span className={`min-w-0 flex-1 text-[14px] font-semibold leading-snug ${abierto ? "" : "truncate"}`}>{s.titular}</span>
+        <ChevronDown className={`size-4 shrink-0 text-dim transition-transform ${abierto ? "rotate-180" : ""}`} />
       </button>
       {abierto && (
-        <div className="mt-2.5 pl-11">
+        <div className="mt-2 pl-[26px]">
           <ul className="space-y-1 text-sm text-text/85">
             {s.puntos.map((p, i) => (
               <li key={i} className="flex gap-2">
@@ -77,7 +70,7 @@ export function PanelSituacion() {
             </div>
           )}
           <p className="mt-2 text-[11px] text-dim">
-            {s.local ? "Resumen automático" : "Resumen generado con IA"} · {horaLima(s.generado)}
+            {s.local ? "Automático" : "IA"} · {horaLima(s.generado)}
           </p>
         </div>
       )}

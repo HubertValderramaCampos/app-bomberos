@@ -10,6 +10,7 @@ import { IconoCategoria } from "@/components/IconoCategoria";
 import { activarPush, desactivarPush, esIOS, esStandalone, probarPush, sincronizarPush, soportaPush, suscripcionActual } from "@/lib/cliente/push";
 import { tonoAlerta } from "@/lib/cliente/sonido";
 import { distanciaKm } from "@/lib/geo";
+import { Credito } from "@/components/Credito";
 
 type EstadoPush = "cargando" | "no_soportado" | "ios_instalar" | "denegado" | "inactivo" | "activo";
 
@@ -94,11 +95,8 @@ export default function AlertasPage() {
     setPrefs({ categorias: prefs.categorias.includes(c) ? prefs.categorias.filter((x) => x !== c) : [...prefs.categorias, c] });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div>
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wide">Alertas</h1>
-        <p className="text-xs text-muted">Recibe en tu celular las emergencias cercanas y los despachos de tu compañía, con resumen.</p>
-      </div>
+    <div className="mx-auto max-w-3xl space-y-4">
+      <h1 className="font-display text-xl font-bold uppercase tracking-wide">Alertas</h1>
 
       {/* Estado de notificaciones */}
       <section className="rounded-2xl border border-line bg-surface p-4">
@@ -111,24 +109,24 @@ export default function AlertasPage() {
               {
                 {
                   cargando: "Comprobando…",
-                  no_soportado: "Este navegador no admite notificaciones push",
-                  ios_instalar: "En iPhone, instala la app para recibir alertas",
+                  no_soportado: "Sin soporte de notificaciones",
+                  ios_instalar: "Instala la app primero",
                   denegado: "Notificaciones bloqueadas",
-                  inactivo: "Notificaciones desactivadas",
-                  activo: "Notificaciones activas en este dispositivo",
+                  inactivo: "Notificaciones apagadas",
+                  activo: "Notificaciones activas",
                 }[estado]
               }
             </p>
             <p className="mt-0.5 text-sm text-muted">
               {estado === "ios_instalar" && (
                 <>
-                  Toca <Share className="inline size-3.5" /> Compartir → «Agregar a pantalla de inicio», abre la app desde el ícono y vuelve aquí (iOS 16.4 o superior).
+                  <Share className="inline size-3.5" /> Compartir → Agregar a inicio
                 </>
               )}
-              {estado === "denegado" && "Permite las notificaciones para este sitio en los ajustes del navegador y recarga."}
-              {estado === "inactivo" && "Funcionan aunque la app esté cerrada. Configura tu zona y actívalas."}
-              {estado === "activo" && "Recibirás un aviso aunque la app esté cerrada. Los cambios de abajo se guardan solos."}
-              {estado === "no_soportado" && "Usa Chrome en Android o instala la app en iPhone."}
+              {estado === "denegado" && "Actívalas en los ajustes del teléfono"}
+              {estado === "inactivo" && "Llegan aunque la app esté cerrada"}
+              {estado === "activo" && "Los cambios se guardan solos"}
+              {estado === "no_soportado" && "Usa Chrome en Android"}
             </p>
           </div>
         </div>
@@ -164,9 +162,7 @@ export default function AlertasPage() {
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
         <div className="p-4 pb-3">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Zona de alerta</h2>
-          <p className="mt-1 text-sm text-muted">
-            {prefs.seguirUbicacion ? "Sigue tu ubicación cada vez que abres la app." : "Punto fijo (toca el mapa para moverlo): tu casa, trabajo o cuartel."}
-          </p>
+          <p className="mt-1 text-xs text-dim">{prefs.seguirUbicacion ? "Sigue tu ubicación" : "Toca el mapa para mover el punto"}</p>
         </div>
         <div className="h-64">
           <MapaDinamico
@@ -211,9 +207,7 @@ export default function AlertasPage() {
             />
           </label>
           {zona && (
-            <p className="text-xs text-dim">
-              Ahora mismo hay {enZona.length} emergencia{enZona.length === 1 ? "" : "s"} activa{enZona.length === 1 ? "" : "s"} en tu zona con estos filtros.
-            </p>
+            <p className="text-xs text-dim">{enZona.length} activa{enZona.length === 1 ? "" : "s"} en tu zona ahora</p>
           )}
         </div>
       </section>
@@ -246,7 +240,7 @@ export default function AlertasPage() {
       {/* Compañía */}
       <section className="rounded-2xl border border-line bg-surface p-4">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Mi compañía</h2>
-        <p className="mt-1 text-sm text-muted">Aviso prioritario cuando despachen una unidad de tu compañía (o la llamen por radio), esté donde esté.</p>
+        <p className="mt-1 text-xs text-dim">Aviso prioritario si la despachan o la llaman por radio</p>
         <div className="mt-3 flex items-center gap-2">
           <span className="font-display text-2xl font-bold text-dim">B-</span>
           <input
@@ -275,13 +269,15 @@ export default function AlertasPage() {
       {servidor && (
         <section className="rounded-2xl border border-line bg-surface p-4 text-sm">
           <h2 className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
-            <Smartphone className="size-4" /> Estado del servicio
+            <Smartphone className="size-4" /> Servicio
           </h2>
-          <Linea ok={servidor.sgo.ok} txt={`Fuente SGO ${servidor.sgo.ok ? `en línea · ${servidor.sgo.emergencias} emergencias (24 h)` : "sin respuesta"}`} />
-          <Linea ok={servidor.ia.disponible} txt={servidor.ia.disponible ? "IA disponible" : servidor.ia.configurada ? "IA en pausa (sin saldo o error); se usan guías automáticas" : "IA no configurada"} />
-          <Linea ok={servidor.push.configurado} txt={servidor.push.configurado ? "Servidor de notificaciones configurado" : "Notificaciones sin configurar"} />
+          <Linea ok={servidor.sgo.ok} txt={servidor.sgo.ok ? "SGO en línea" : "SGO sin respuesta"} />
+          <Linea ok={servidor.ia.disponible} txt={servidor.ia.disponible ? "IA disponible" : "IA en pausa · guías automáticas"} />
+          <Linea ok={servidor.push.configurado} txt={servidor.push.configurado ? "Notificaciones listas" : "Notificaciones sin configurar"} />
         </section>
       )}
+
+      <Credito className="pt-2" />
     </div>
   );
 }

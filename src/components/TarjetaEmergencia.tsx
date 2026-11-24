@@ -43,7 +43,7 @@ export function TarjetaEmergencia({
       href={`/emergencia/${e.parte}`}
       onMouseEnter={() => onHover?.(e.parte)}
       onMouseLeave={() => onHover?.(null)}
-      className={`group relative flex gap-3 overflow-hidden rounded-xl border bg-surface p-3 pl-4 transition-colors hover:border-line-strong hover:bg-surface-2 ${
+      className={`pulsar group relative flex gap-3 overflow-hidden rounded-xl border bg-surface p-3 pl-4 active:bg-surface-2 ${
         seleccionada ? "border-line-strong bg-surface-2" : "border-line"
       } ${nueva ? "destello" : ""} ${e.activa ? "" : "opacity-70"}`}
     >
