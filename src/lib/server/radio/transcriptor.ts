@@ -245,9 +245,8 @@ class Transcriptor extends EventEmitter {
     );
     for (const c of this.canales) void c.bucleAudio();
     void this.bucleActividad();
-    // Vinculación por IA de lo que no tenía código de unidad (y re-intento cuando aparece una emergencia nueva)
-    // Cada 2 min se agrupan las pendientes en una sola consulta (antes 45 s): menos llamadas, mismo resultado.
-    setInterval(() => void this.vincularPendientes(), 120_000).unref?.();
+    // Vinculación por IA de lo que no tenía código de unidad: SOLO bajo demanda (al abrir una emergencia),
+    // nunca en segundo plano. Aquí solo se marca que hay algo nuevo por vincular.
     getMonitor().on("evento", (ev: { tipo: string }) => {
       if (ev.tipo === "nueva") this.hayNovedadIA = true;
     });
@@ -399,6 +398,20 @@ class Transcriptor extends EventEmitter {
   }
 
   // ── Vinculación con IA ──────────────────────────────────────────────────
+  private ultimaVinculacion = 0;
+  private vinculando: Promise<void> | null = null;
+
+  /** Vincula con IA las transmisiones pendientes. Se llama al abrir una emergencia; como máximo una vez por minuto. */
+  vincularAhora(): Promise<void> {
+    if (this.vinculando) return this.vinculando;
+    if (Date.now() - this.ultimaVinculacion < 60_000) return Promise.resolve();
+    this.ultimaVinculacion = Date.now();
+    this.vinculando = this.vincularPendientes().finally(() => {
+      this.vinculando = null;
+    });
+    return this.vinculando;
+  }
+
   private async vincularPendientes() {
     if (!this.hayNovedadIA) return;
     this.hayNovedadIA = false;

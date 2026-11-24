@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 /** Lo comunicado por radio sobre una emergencia: transmisiones vinculadas + resumen con IA. */
 export async function GET(_req: Request, ctx: RouteContext<"/api/radio/emergencia/[parte]">) {
   const { parte } = await ctx.params;
+  // Vinculación bajo demanda (máx. 1/min, el resultado queda para todos). Tope de espera para no trabar la pantalla.
+  await Promise.race([getTranscriptor().vincularAhora().catch(() => {}), new Promise((r) => setTimeout(r, 8_000))]);
   const transmisiones = getTranscriptor()
     .lista()
     .filter((t) => t.partes.includes(parte));

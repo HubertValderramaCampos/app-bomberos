@@ -4,7 +4,6 @@ import type { Emergencia, PrefsAlertas, SelectivaInfo } from "@/lib/types";
 import { CATEGORIAS } from "@/lib/categorias";
 import { distanciaKm, formatoDistancia } from "@/lib/geo";
 import { guardar, leer } from "./store";
-import { obtenerBriefing } from "./ia";
 
 export interface Suscripcion {
   id: string;
@@ -144,15 +143,11 @@ export async function notificarEmergencia(e: Emergencia, maquinasNuevas?: string
   }
   if (destinos.length === 0) return;
 
-  // Sin consulta extra al SGO: el resumen se arma con los datos que ya trajo el sondeo
-  const briefing = await Promise.race([
-    obtenerBriefing(e, [], "push"),
-    new Promise<null>((r) => setTimeout(() => r(null), 12_000)),
-  ]).catch(() => null);
+  // Sin IA: el texto de la notificación sale directo de los datos (ahorra llamadas; los bomberos ya saben qué hacer)
 
   const cat = CATEGORIAS[e.categoria];
   const lugar = [e.direccion, e.distrito].filter(Boolean).join(" · ");
-  const cuerpo = briefing?.resumen || `${e.subtipo || e.tipoPrincipal}${lugar ? ` · ${lugar}` : ""}`;
+  const cuerpo = `${e.subtipo || e.tipoPrincipal}${lugar ? ` · ${lugar}` : ""}`;
 
   await Promise.all(
     destinos.map(async ({ sub, motivo }) => {
