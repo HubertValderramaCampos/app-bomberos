@@ -134,6 +134,10 @@ export interface Transmision {
   /** Emergencias (partes) a las que se vinculó */
   partes: string[];
   vinculo: "codigo" | "ia" | null;
+  /** true cuando ya pasó la segunda pasada (conversación completa + contexto + corrección) */
+  refinado?: boolean;
+  /** Texto de la primera pasada (inmediata), antes de corregir */
+  textoRapido?: string;
 }
 
 /** Selectiva (par de tonos Quick Call II con que la Central llama a una compañía). */

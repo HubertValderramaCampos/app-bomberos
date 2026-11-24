@@ -8,6 +8,7 @@ import { guardar, leer } from "../store";
 import { alinearFrame } from "./mp3";
 import { extraerUnidades, vincularPorCodigo } from "./vinculo";
 import { vincularConIA } from "./radio-ia";
+import { guardarAudio, iniciarRefinador } from "./refinador";
 
 /**
  * Escucha los canales de la radio de la IV CDLC y transcribe cada transmisión con Whisper.
@@ -264,6 +265,7 @@ class Transcriptor extends EventEmitter {
       `[radio] transcripción activa — ${FUENTE === "scan" ? "Scan 1-4" : "por canal"} (${IDS_CANALES.join(", ")}) con ${MODELO}, tope ${MAX_MIN_DIA} min/día`,
     );
     for (const c of this.canales) void c.bucleAudio();
+    iniciarRefinador(this);
     void this.bucleActividad();
     // Vinculación por IA de lo que no tenía código de unidad: SOLO bajo demanda (al abrir una emergencia),
     // nunca en segundo plano. Aquí solo se marca que hay algo nuevo por vincular.
@@ -427,9 +429,20 @@ class Transcriptor extends EventEmitter {
       vinculo: partes.length ? "codigo" : null,
       ...(canales.length > 1 ? { canales, solapado: s.solape >= 0.5 } : {}),
     };
+    guardarAudio(tx.id, audio);
     this.guardarTx(tx);
     if (!partes.length) this.hayNovedadIA = true;
     console.log(`[radio] ${canales.join("+") || canal} ${tx.duracion}s${partes.length ? ` → #${partes.join(",")}` : ""}: ${texto.slice(0, 90)}`);
+  }
+
+  /** Reemplaza una transmisión ya guardada (segunda pasada). Texto vacío = no hubo habla real: se borra. */
+  reemplazar(tx: Transmision) {
+    const lista = this.lista();
+    const i = lista.findIndex((x) => x.id === tx.id);
+    if (i < 0) return;
+    if (tx.texto) lista[i] = tx;
+    else lista.splice(i, 1);
+    guardar("transmisiones", lista);
   }
 
   private guardarTx(tx: Transmision, emitir = true) {

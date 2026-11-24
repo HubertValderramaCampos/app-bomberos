@@ -30,3 +30,21 @@ export function alinearFrame(buf: Buffer): Buffer {
   }
   return buf.subarray(0, 0);
 }
+
+/** Duración en segundos de un buffer MP3 (suma de frames, sin decodificar). */
+export function duracionMp3(buf: Buffer): number {
+  let o = 0;
+  let seg = 0;
+  while (o + 4 <= buf.length) {
+    const l = largoFrame(buf, o);
+    if (!l) {
+      o++;
+      continue;
+    }
+    const ver = (buf[o + 1] >> 3) & 3;
+    const sr = SR[ver][(buf[o + 2] >> 2) & 3];
+    seg += (ver === 3 ? 1152 : 576) / sr;
+    o += l;
+  }
+  return seg;
+}

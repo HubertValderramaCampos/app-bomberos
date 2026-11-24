@@ -39,7 +39,10 @@ export function ListaTransmisiones({ items, mostrarVinculo = true, nuevas }: { i
               </p>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[15px] leading-snug text-text/90">{t.texto}</p>
+              <p className={`text-[15px] leading-snug ${!t.refinado && Date.now() - new Date(t.ini).getTime() < 15 * 60_000 ? "italic text-muted" : "text-text/90"}`}>
+                {t.texto}
+                {!t.refinado && Date.now() - new Date(t.ini).getTime() < 15 * 60_000 && <span className="ml-1.5 text-[10px] not-italic text-dim">· afinando…</span>}
+              </p>
               {claves.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {claves.map((c) => (
