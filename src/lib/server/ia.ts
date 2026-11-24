@@ -30,16 +30,15 @@ async function describirFotoMatpel(imagenDataUrl: string): Promise<string | null
     const r = await c.chat.completions.create({
       model: MODELO_VISION,
       max_tokens: 600,
+      // Pregunta directa, sin instrucciones de sistema: probado como la forma más consistente de leer la placa
       messages: [
-        {
-          role: "system",
-          content:
-            "Transcribe exactamente los números y textos que se leen en la foto y describe en una línea qué objeto es (placa, etiqueta, envase, vehículo). Menciona solo lo que de verdad aparece; no supongas símbolos, colores ni partes que no se ven. Máximo 3 líneas.",
-        },
         {
           role: "user",
           content: [
-            { type: "text", text: "¿Qué números y textos se leen en esta imagen?" },
+            {
+              type: "text",
+              text: "Esta foto es de un material peligroso (placa naranja, rombo, etiqueta o envase). ¿Qué número ONU, nombre o clase muestra y qué material es? Responde en una o dos líneas, solo con lo que se lee en la imagen.",
+            },
             { type: "image_url", image_url: { url: imagenDataUrl } },
           ],
         },
@@ -49,6 +48,8 @@ async function describirFotoMatpel(imagenDataUrl: string): Promise<string | null
     const txt = (r.choices[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     return txt || null;
   } catch (err) {
+    // El modelo de visión tiene un límite bajo por minuto: mensaje claro en vez de error genérico
+    if ((err as { status?: number }).status === 429) throw new FotoNoDisponible("Muchas fotos seguidas. Espera un minuto o escribe el N° ONU.");
     registrarErrorIA(err);
   }
 }
