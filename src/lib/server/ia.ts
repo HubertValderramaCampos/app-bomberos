@@ -87,9 +87,12 @@ export async function completarJSON<T>(opts: {
   usuario: OpenAI.Chat.ChatCompletionContentPart[] | string;
   /** Prioridad en el presupuesto diario de tokens (ver presupuesto-ia.ts). */
   prioridad: Prioridad;
+  /** false = no cuenta en el presupuesto (modelos con cuota propia en el proveedor, p. ej. gpt-oss-20b en Groq) */
+  presupuesto?: boolean;
 }): Promise<T> {
   const c = clienteIA();
-  if (!hayCupo(opts.prioridad)) throw new IANoDisponible(`Presupuesto diario sin cupo para prioridad ${opts.prioridad}`);
+  const cuenta = opts.presupuesto !== false;
+  if (cuenta && !hayCupo(opts.prioridad)) throw new IANoDisponible(`Presupuesto diario sin cupo para prioridad ${opts.prioridad}`);
 
   try {
     const r = await c.chat.completions.create({
@@ -104,7 +107,7 @@ export async function completarJSON<T>(opts: {
         json_schema: { name: opts.nombre, strict: true, schema: opts.schema },
       },
     });
-    registrarConsumo(r.usage?.total_tokens);
+    if (cuenta) registrarConsumo(r.usage?.total_tokens);
     const txt = r.choices[0]?.message?.content;
     if (!txt) throw new Error("Respuesta vacía del modelo");
     g.__iaUltimoError = null;

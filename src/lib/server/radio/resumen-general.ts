@@ -1,6 +1,9 @@
 import type { Transmision } from "@/lib/types";
 import { cortoCanal } from "@/lib/canales";
-import { completarJSON, CONTEXTO, MODELO_RAPIDO } from "../ia";
+import { completarJSON, CONTEXTO } from "../ia";
+
+/** Modelo liviano con cuota propia en Groq: el resumen no gasta el presupuesto de despachos y briefings. */
+const MODELO_RESUMEN = process.env.OPENAI_MODEL_RESUMEN || "openai/gpt-oss-20b";
 const palabrasDe = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
 import { getMonitor } from "../monitor";
 import { getTranscriptor } from "./transcriptor";
@@ -29,6 +32,8 @@ export interface ResumenGeneral {
 const VENTANA_MS = 45 * 60_000;
 const MIN_PALABRAS_NUEVAS = 25;
 const MIN_ESPERA_MS = 2 * 60_000;
+/** Más viejo que esto ya no se muestra mientras se genera el nuevo: se espera el nuevo. */
+const MAX_VIGENCIA_MS = 6 * 60_000;
 
 const SCHEMA = {
   type: "object",
@@ -66,10 +71,11 @@ async function generar(txs: Transmision[]): Promise<ResumenGeneral | null> {
     .slice(0, 30)
     .map((e) => `#${e.parte} ${e.tipoPrincipal} | ${e.direccion}, ${e.distrito} | ${e.maquinas.join(",")}`);
   const r = await completarJSON<{ puntos: PuntoRadio[] }>({
-    modelo: MODELO_RAPIDO,
+    modelo: MODELO_RESUMEN,
     esfuerzo: "low",
     nombre: "resumen_radio_general",
     prioridad: "media",
+    presupuesto: false,
     schema: SCHEMA,
     sistema: `${CONTEXTO}
 Resumes la radio de la Central (transcripción automática con errores) para bomberos que ya conocen el oficio.
@@ -105,7 +111,10 @@ export async function obtenerResumenGeneral(): Promise<ResumenGeneral | null> {
   const reciente = st.cache && Date.now() - Date.parse(st.cache.generado) < MIN_ESPERA_MS;
   const pocoNuevo = st.cache && Math.abs(palabras - st.palabras) < MIN_PALABRAS_NUEVAS;
   if (st.cache && (reciente || pocoNuevo)) return st.cache;
-  if (st.enCurso) return st.cache ?? (await st.enCurso);
+  if (st.enCurso) {
+    const vigente = st.cache && Date.now() - Date.parse(st.cache.generado) < MAX_VIGENCIA_MS;
+    return vigente ? st.cache : await st.enCurso;
+  }
   st.enCurso = generar(txs)
     .then((r) => {
       if (r) {
@@ -121,5 +130,7 @@ export async function obtenerResumenGeneral(): Promise<ResumenGeneral | null> {
     .finally(() => {
       st.enCurso = null;
     });
-  return st.cache ?? (await st.enCurso);
+  // Si lo guardado es reciente se muestra al instante; si está viejo, se espera el nuevo
+  const vigente = st.cache && Date.now() - Date.parse(st.cache.generado) < MAX_VIGENCIA_MS;
+  return vigente ? st.cache : await st.enCurso;
 }
