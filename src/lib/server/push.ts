@@ -76,6 +76,10 @@ export interface Payload {
   tag: string;
   categoria?: string;
   urgente?: boolean;
+  /** URL de navegación (Google Maps) para el botón "Ir" de la notificación */
+  ir?: string | null;
+  /** Mostrar botón "Radio" */
+  radio?: boolean;
 }
 
 async function enviar(sub: Suscripcion, payload: Payload): Promise<boolean> {
@@ -103,78 +107,119 @@ export async function enviarPrueba(endpoint: string) {
   const sub = leer<Mapa>("suscripciones", {})[idDe(endpoint)];
   if (!sub) return false;
   return enviar(sub, {
-    title: "Alerta 116 · Prueba",
-    body: "Las notificaciones funcionan. Recibirás aquí las emergencias de tu zona.",
+    // Ejemplo con el formato real: ícono, distancia y tiempo, dirección, unidades y botones
+    title: "🔥 INCENDIO · 2.3 km ~8 min (PRUEBA)",
+    body: "ESTRUCTURAS / VIVIENDA\nAv. Ejemplo 123 · SURQUILLO\nM11-1 · AMB-11-3 · RES-2",
     url: "/",
     tag: "prueba",
+    ir: "https://www.google.com/maps/dir/?api=1&destination=-12.1125,-77.0125&travelmode=driving",
+    radio: true,
   });
 }
 
-type Motivo = { tipo: "compania"; compania: number } | { tipo: "cercana"; km: number };
+type Motivo =
+  | { tipo: "compania"; compania: number }
+  | { tipo: "cercana"; km: number }
+  | { tipo: "escala"; km: number | null; umbral: number };
+const ICONO: Record<string, string> = { incendio: "🔥", medica: "🚑", rescate: "🆘", vehicular: "🚗", matpel: "☣️", servicio: "🛠️", otro: "📍" };
+/** Umbrales de unidades a partir de los cuales una emergencia "se amplía" (se avisa una vez por umbral). */
+const UMBRALES_AMPLIA = [4, 7, 10];
+/** Claves de incendio con apoyo creciente (20-15 … 20-18) o catástrofe (20-19) también cuentan como ampliación. */
+const CLAVE_MAYOR = /\b20[-\s.]?(16|17|18|19)\b/;
 
-function motivoPara(sub: Suscripcion, e: Emergencia, maquinasNuevas?: string[]): Motivo | null {
+/** Tiempo estimado manejando en Lima (calles, no línea recta): ~22 km/h + 2 min de salida. */
+const etaMin = (km: number) => Math.max(1, Math.round(2 + ((km * 1.35) / 22) * 60));
+
+const urlIr = (e: Emergencia) =>
+  e.lat != null && e.lng != null
+    ? `https://www.google.com/maps/dir/?api=1&destination=${e.lat},${e.lng}&travelmode=driving`
+    : e.direccion
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${e.direccion}, ${e.distrito}, Perú`)}`
+      : null;
+
+function kmDesde(sub: Suscripcion, e: Emergencia) {
   const p = sub.prefs;
-  if (p.compania) {
-    const enLista = (maquinasNuevas ?? e.maquinas).some((m) => {
-      const n = m.match(/(\d+)/);
-      return n && Number(n[1]) === p.compania;
-    });
-    if (enLista) return { tipo: "compania", compania: p.compania };
-  }
-  if (maquinasNuevas) return null; // en actualizaciones solo avisamos por compañía
   if (p.lat == null || p.lng == null || e.lat == null || e.lng == null) return null;
-  if (!p.categorias.includes(e.categoria)) return null;
-  const km = distanciaKm({ lat: p.lat, lng: p.lng }, { lat: e.lat, lng: e.lng });
-  return km <= p.radioKm ? { tipo: "cercana", km } : null;
+  return distanciaKm({ lat: p.lat, lng: p.lng }, { lat: e.lat, lng: e.lng });
+}
+
+function esDeMiCompania(sub: Suscripcion, maquinas: string[], companias: number[]) {
+  const c = sub.prefs.compania;
+  if (!c) return false;
+  return companias.includes(c) || maquinas.some((m) => Number((m.match(/(\d+)/) ?? [])[1]) === c);
+}
+
+/** Qué avisar a esta suscripción y con qué clave de "ya avisado" (para no repetir). */
+function motivoPara(sub: Suscripcion, e: Emergencia, maquinasNuevas?: string[]): { motivo: Motivo; clave: string } | null {
+  const p = sub.prefs;
+  if (esDeMiCompania(sub, maquinasNuevas ?? e.maquinas, maquinasNuevas ? [] : e.companias)) {
+    return { motivo: { tipo: "compania", compania: p.compania! }, clave: e.parte };
+  }
+  const km = kmDesde(sub, e);
+  const enZona = km != null && km <= p.radioKm && p.categorias.includes(e.categoria);
+  if (maquinasNuevas) {
+    // Se amplía: más unidades (cruza un umbral) o clave de incendio mayor, en tu zona o de tu tipo de interés
+    if (!e.activa || !(enZona || (km != null && km <= p.radioKm * 2 && e.categoria === "incendio"))) return null;
+    const umbral = [...UMBRALES_AMPLIA].reverse().find((u) => e.maquinas.length >= u && e.maquinas.length - maquinasNuevas.length < u);
+    const porClave = CLAVE_MAYOR.test(e.radio?.texto ?? "") ? 99 : null;
+    const u = umbral ?? porClave;
+    return u ? { motivo: { tipo: "escala", km, umbral: u }, clave: `${e.parte}#amplia${u}` } : null;
+  }
+  return enZona ? { motivo: { tipo: "cercana", km: km! }, clave: e.parte } : null;
 }
 
 /**
- * Se llama cuando el monitor detecta una emergencia nueva o nuevas unidades.
- * Genera el resumen con IA solo si hay al menos un destinatario.
+ * Notificación de emergencia nueva, de nuevas unidades de tu compañía o de ampliación.
+ * Formato para leer de un vistazo: ícono + tipo + distancia/tiempo, dirección y unidades, con botones Ir y Radio.
  */
 export async function notificarEmergencia(e: Emergencia, maquinasNuevas?: string[]) {
   if (!configurarVapid()) return;
   const mapa = leer<Mapa>("suscripciones", {});
-  const destinos: { sub: Suscripcion; motivo: Motivo }[] = [];
+  const destinos: { sub: Suscripcion; motivo: Motivo; clave: string }[] = [];
   for (const sub of Object.values(mapa)) {
-    if (sub.notificados.includes(e.parte)) continue;
-    const motivo = motivoPara(sub, e, maquinasNuevas);
-    if (motivo) destinos.push({ sub, motivo });
+    const m = motivoPara(sub, e, maquinasNuevas);
+    if (m && !sub.notificados.includes(m.clave)) destinos.push({ sub, ...m });
   }
   if (destinos.length === 0) return;
 
-  // Sin IA: el texto de la notificación sale directo de los datos (ahorra llamadas; los bomberos ya saben qué hacer)
-
-  const cat = CATEGORIAS[e.categoria];
-  const lugar = [e.direccion, e.distrito].filter(Boolean).join(" · ");
-  const cuerpo = `${e.subtipo || e.tipoPrincipal}${lugar ? ` · ${lugar}` : ""}`;
+  const icono = ICONO[e.categoria] ?? "📍";
+  const tipo = e.subtipo ? `${e.tipoPrincipal} · ${e.subtipo}` : e.tipoPrincipal;
+  const lugar = [e.direccion, e.distrito].filter(Boolean).join(" · ") || "Dirección por confirmar";
+  const unidades = e.maquinas.length ? e.maquinas.join(" · ") : "";
+  const porRadio = e.fuente === "radio" ? "🔊 Por radio, aún no está en el SGO" : "";
 
   await Promise.all(
-    destinos.map(async ({ sub, motivo }) => {
-      const title =
-        motivo.tipo === "compania"
-          ? `B-${motivo.compania} DESPACHADA · ${e.tipoPrincipal}`
-          : `${cat.corto.toUpperCase()} a ${formatoDistancia(motivo.km)} · ${e.distrito || "cerca"}`;
-      const body = `${cuerpo}\n${e.maquinas.join(" · ")}`.trim();
+    destinos.map(async ({ sub, motivo, clave }) => {
+      const km = kmDesde(sub, e);
+      const cerca = km != null ? ` · ${formatoDistancia(km)} ~${etaMin(km)} min` : "";
+      let title: string;
+      if (motivo.tipo === "compania") title = `🚨 B-${motivo.compania} DESPACHADA · ${icono} ${e.tipoPrincipal}`;
+      else if (motivo.tipo === "escala")
+        title = `⚠️ SE AMPLÍA · ${icono} ${e.tipoPrincipal} · ${e.maquinas.length} unidades${maquinasNuevas?.length ? ` (+${maquinasNuevas.length})` : ""}`;
+      else title = `${icono} ${e.tipoPrincipal}${cerca}`;
+      const body = [motivo.tipo === "cercana" ? (e.subtipo || "") : tipo + cerca, lugar, unidades, porRadio].filter(Boolean).join("\n");
       const ok = await enviar(sub, {
         title,
         body,
         url: `/emergencia/${e.parte}`,
-        tag: `parte-${e.parte}`,
+        // La provisional por radio y la del SGO comparten etiqueta: la notificación se ACTUALIZA, no se duplica
+        tag: motivo.tipo === "escala" ? `amplia-${e.parte}` : `parte-${e.radio?.provisional ?? e.parte}`,
         categoria: e.categoria,
-        urgente: motivo.tipo === "compania" || e.categoria === "incendio" || e.categoria === "matpel",
+        urgente: motivo.tipo !== "cercana" || e.categoria === "incendio" || e.categoria === "matpel",
+        ir: urlIr(e),
+        radio: true,
       });
       if (ok) {
         const actual = leer<Mapa>("suscripciones", {});
         const s = actual[sub.id];
         if (s) {
-          s.notificados = [...s.notificados, e.parte].slice(-300);
+          s.notificados = [...s.notificados, clave].slice(-300);
           guardar("suscripciones", actual);
         }
       }
     }),
   );
-  console.log(`[push] parte ${e.parte}: ${destinos.length} notificación(es)`);
+  console.log(`[push] parte ${e.parte}${maquinasNuevas ? " (actualización)" : ""}: ${destinos.length} notificación(es)`);
 }
 
 /** La Central llamó por selectiva a una compañía: aviso a quienes la tienen como "mi compañía". */
@@ -187,11 +232,12 @@ export async function notificarSelectiva(sel: SelectivaInfo) {
   await Promise.all(
     destinos.map((sub) =>
       enviar(sub, {
-        title: `Selectiva: la Central llama a ${sel.cia}${probable}`,
-        body: `Canal 2 · ${hora}${sel.nombre ? ` · ${sel.nombre}` : ""}. Escucha la radio para el despacho.`,
+        title: `🚨 LA CENTRAL LLAMA A ${sel.cia}${probable}`,
+        body: `Selectiva ${hora} · Canal 2\nEscucha el despacho ahora`,
         url: sel.parte ? `/emergencia/${sel.parte}` : "/radio",
         tag: `sel-${sel.epoch}`,
         urgente: true,
+        radio: true,
       }),
     ),
   );

@@ -15,6 +15,16 @@ import { hace, horaLima } from "@/lib/tiempo";
 
 export default function RadioPage() {
   const r = useRadio();
+
+  // Desde el botón "Radio" de una notificación: /radio?escuchar=c2 abre ese canal y empieza a sonar
+  useEffect(() => {
+    const canal = new URLSearchParams(window.location.search).get("escuchar");
+    if (!canal) return;
+    r.setCanal(canal);
+    if (!r.reproduciendo) r.alternar();
+    window.history.replaceState(null, "", "/radio");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir la pantalla
+  }, []);
   const { prefs, transmisiones, transcripcionHabilitada } = useLive();
   const [filtroCanal, setFiltroCanal] = useState<string | null>(null);
   const visibles = filtroCanal ? transmisiones.filter((t) => t.canal === filtroCanal) : transmisiones;

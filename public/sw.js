@@ -17,7 +17,11 @@ self.addEventListener("push", (event) => {
     renotify: !!data.tag,
     icon: "/pwa-icon/192",
     badge: "/pwa-icon/badge",
-    data: { url: data.url || "/" },
+    data: { url: data.url || "/", ir: data.ir || null },
+    actions: [
+      ...(data.ir ? [{ action: "ir", title: "🧭 Ir" }] : []),
+      ...(data.radio ? [{ action: "radio", title: "📻 Radio" }] : []),
+    ],
     vibrate: data.urgente ? [300, 120, 300, 120, 600] : [200, 100, 200],
     requireInteraction: !!data.urgente,
     timestamp: Date.now(),
@@ -27,7 +31,13 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  // Botón "Ir": abre la navegación directo (Google Maps), sin pasar por la app
+  if (event.action === "ir" && event.notification.data?.ir) {
+    event.waitUntil(self.clients.openWindow(event.notification.data.ir));
+    return;
+  }
+  const destino = event.action === "radio" ? "/radio?escuchar=c2" : event.notification.data?.url || "/";
+  const url = new URL(destino, self.location.origin).href;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientes) => {
       for (const c of clientes) {
