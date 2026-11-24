@@ -43,7 +43,7 @@ interface Registro {
  * Estaciones presentes alrededor de una selectiva a la hora T (ms), con su peso:
  *  - partes del SGO despachados entre 2 min antes y 4 min después;
  *  - transmisiones de los 90 s siguientes que nombran unidades (pesan más: suelen ser el despacho).
- * Solo cuentan estaciones de la IV CDLC que no estén en `excluir`.
+ * Cuentan todas las compañías que no estén en `excluir`.
  */
 export function evidenciaSelectiva(
   T: number,
@@ -52,7 +52,8 @@ export function evidenciaSelectiva(
   excluir: Set<string> = new Set(),
 ): Map<string, number> {
   const evidencia = new Map<string, number>();
-  const valida = (cia: string) => !!estacion(cia) && !excluir.has(cia);
+  // Cualquier compañía (no solo Lima Centro): así también aprende pares de Lima Sur, Norte, Este y Callao
+  const valida = (cia: string) => /^B-d{1,3}$/.test(cia) && !excluir.has(cia);
   for (const e of emergencias) {
     const f = Date.parse(e.fecha);
     if (f < T - 120_000 || f > T + 240_000) continue;
