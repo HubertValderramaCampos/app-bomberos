@@ -174,6 +174,7 @@ Reglas:
 - Usa el contexto: unidades despachadas, direcciones y distritos de las emergencias en curso, y las claves. Si algo suena parecido a una unidad, calle o distrito del contexto, corrígelo ("comercio 127-1" → "máquina 127-1"; "cove 73" → "AMB-73" solo si encaja).
 - Unidades como se dicen: máquina 127-1, ambulancia 96-1, médica 28, rescate 2. Claves y números en cifras: 10-20, 10-33, 20-15.
 - NO inventes contenido ni completes frases. Lo que no se entiende: [inaudible]. Si una versión es un invento sobre ruido (frases sin sentido en una radio de bomberos, cuentas "5, 4, 3, 2, 1"), descártala.
+- Escribe con puntuación y mayúsculas normales para que se lea rápido: "Central, 10-10, médica 28.", "Jirón Colón 542, Miraflores." Sin palabras repetidas por eco del audio.
 - Estilo de radio, breve, sin explicaciones. Texto vacío si no hubo habla real.
 Claves: ${CLAVES_TXT}`,
     usuario: `Emergencias en curso:\n${ctx || "(ninguna)"}\n\nLo dicho antes en este canal: ${previo || "(nada)"}\n\nTransmisiones del canal ${piezas[0].tx.canal}, en orden:\n${JSON.stringify(items)}`,
