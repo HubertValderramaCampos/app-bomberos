@@ -48,11 +48,17 @@ const MAX_SEG = 60; // s por transmisión agrupada
 const BUFFER_MS = 180_000;
 const RETENCION_MS = 24 * 3600_000;
 
-// Vocabulario para Whisper: formato de unidades y de claves CGBVP (se dicen "diez treinta y tres" → 10-33)
+// Vocabulario para Whisper large-v3 con números EN CIFRAS: así escribe "máquina 155-1", "10-20" (y no
+// "diez veinte"), que es lo que reconocen la extracción de unidades y la vinculación. Probado con radio real.
 const PROMPT =
-  "Radio de bomberos, Central de Emergencias, Lima. Unidades M150-1, AMB-28, RES-10, CIST-38, RESLIG-127. Claves 10-19, 10-20, 10-24, 10-33, 20-15, 20-23, X-7. Central, adelante, conforme, en ruta.";
+  "Radio de la Central de Emergencias de Bomberos, Lima. Atención máquina 134-1, ambulancia 105, rescate ligera 127, M150-1, AMB-28. Avenida, jirón, cruce, cuadra, kilómetro 35, Panamericana Sur. Claves 10-04, 10-05, 10-20, 10-23, 10-33, 20-15. Central, adelante, conforme.";
+/** Si el modelo principal llega a su límite por minuto, se usa este (sin prompt: turbo lo repetiría). */
+const MODELO_RESPALDO = process.env.RADIO_MODELO_RESPALDO || "whisper-large-v3-turbo";
 
-const ALUCINACIONES = /amara\.org|subt[ií]tul|gracias por ver|suscr[ií]b|www\.|\.com\b|^\W*$/i;
+const ALUCINACIONES =
+  /amara\.org|subt[ií]tul|gracias por ver|suscr[ií]b|www\.|\.com\b|cinematograf|nuestro canal|qu[eé] es (la vida|el video)|sigue viviendo|^\W*$/i;
+/** Frases cortas TODO EN MAYÚSCULAS ("SIN CENTRALES"): típico invento de Whisper sobre ruido de radio. */
+const esMayusculasInventadas = (t: string) => !/\d/.test(t) && /^[^a-záéíóúñ]+$/.test(t) && /[A-ZÁÉÍÓÚÑ]{3}/.test(t) && t.split(/\s+/).length <= 4;
 
 interface Segmento {
   ini: number; // epoch s (reloj del receptor)
@@ -346,18 +352,31 @@ class Transcriptor extends EventEmitter {
     let texto = "";
     try {
       if (ES_WHISPER) {
-        const r = await c.audio.transcriptions.create({
-          file,
-          model: MODELO,
-          language: "es",
-          ...(USAR_PROMPT ? { prompt: PROMPT } : {}),
-          temperature: 0,
-          response_format: "verbose_json",
-        });
-        // Descarta fragmentos que Whisper marca como silencio, poco confiables o repetitivos
+        const pedir = (modelo: string, conPrompt: boolean) =>
+          c.audio.transcriptions.create({
+            file,
+            model: modelo,
+            language: "es",
+            ...(conPrompt ? { prompt: PROMPT } : {}),
+            temperature: 0,
+            response_format: "verbose_json",
+          });
+        let r;
+        try {
+          r = await pedir(MODELO, USAR_PROMPT);
+        } catch (err) {
+          // Límite por minuto del modelo principal (ráfagas de radio): se reintenta con el de respaldo
+          const limite = (err as { status?: number }).status === 429;
+          if (!limite || MODELO === MODELO_RESPALDO) throw err;
+          r = await pedir(MODELO_RESPALDO, !/turbo/i.test(MODELO_RESPALDO));
+        }
+        // Descarta fragmentos que Whisper marca como silencio, poco confiables o repetitivos. Los muy cortos
+        // con confianza baja suelen ser inventos sobre ruido ("Cierre.", "SIN CENTRALES").
         texto = (r.segments ?? [])
           .filter((g) => !(g.no_speech_prob > 0.6 && g.avg_logprob < -1) && g.avg_logprob > -1.5 && g.compression_ratio < 2.4)
+          .filter((g) => !(g.text.trim().split(/\s+/).length <= 3 && g.avg_logprob < -0.55))
           .map((g) => g.text.trim())
+          .filter((t) => !esMayusculasInventadas(t))
           .join(" ");
       } else {
         const r = await c.audio.transcriptions.create({ file, model: MODELO, language: "es", ...(USAR_PROMPT ? { prompt: PROMPT } : {}) });
