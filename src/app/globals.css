@@ -66,9 +66,20 @@ textarea,
   -webkit-user-select: text;
   user-select: text;
 }
+/* Solo desplazamiento: sin pellizco ni doble toque para hacer zoom (como una app nativa) */
+html,
+body {
+  touch-action: pan-x pan-y;
+}
 a,
 button {
   touch-action: manipulation;
+}
+/* iOS hace zoom al enfocar campos con letra < 16px */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
 }
 img {
   -webkit-user-drag: none;

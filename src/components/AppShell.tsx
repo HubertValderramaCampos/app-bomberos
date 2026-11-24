@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { Bell, Biohazard, Radio, Siren, X } from "lucide-react";
 import { useLive } from "./providers/LiveProvider";
 import { MiniReproductor } from "./MiniReproductor";
@@ -21,6 +22,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { conexion, snapshot } = useLive();
   const enVivo = conexion === "en_vivo" && snapshot?.ok !== false;
+
+  // iOS ignora user-scalable=no: bloquear el gesto de pellizco fuera del mapa
+  useEffect(() => {
+    const bloquear = (e: Event) => {
+      if (!(e.target as Element | null)?.closest?.(".leaflet-container")) e.preventDefault();
+    };
+    document.addEventListener("gesturestart", bloquear, { passive: false });
+    document.addEventListener("gesturechange", bloquear, { passive: false });
+    return () => {
+      document.removeEventListener("gesturestart", bloquear);
+      document.removeEventListener("gesturechange", bloquear);
+    };
+  }, []);
+
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="sticky top-0 z-[1100] border-b border-line bg-bg pt-[var(--safe-top)]">

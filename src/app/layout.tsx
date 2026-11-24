@@ -26,6 +26,9 @@ export const viewport: Viewport = {
   themeColor: "#0b0d11",
   width: "device-width",
   initialScale: 1,
+  // Sin zoom con los dedos: se comporta como app nativa (el mapa conserva su propio zoom)
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 
