@@ -51,7 +51,7 @@ const RETENCION_MS = 24 * 3600_000;
 // Vocabulario para Whisper large-v3 con números EN CIFRAS: así escribe "máquina 155-1", "10-20" (y no
 // "diez veinte"), que es lo que reconocen la extracción de unidades y la vinculación. Probado con radio real.
 const PROMPT =
-  "Radio de la Central de Emergencias de Bomberos, Lima. Atención máquina 134-1, ambulancia 105, rescate ligera 127, M150-1, AMB-28. Avenida, jirón, cruce, cuadra, kilómetro 35, Panamericana Sur. Claves 10-04, 10-05, 10-20, 10-23, 10-33, 20-15. Central, adelante, conforme.";
+  "Radio de la Central de Emergencias de Bomberos, Lima. Atención máquina 134-1, ambulancia 105, rescate ligera 127, M150-1, AMB-28. Avenida, jirón, cruce, cuadra, kilómetro 35, Panamericana Sur. Claves 10-04, 10-05, 10-20, 10-23, 10-33, 20-15.";
 /** Si el modelo principal llega a su límite por minuto, se usa este (sin prompt: turbo lo repetiría). */
 const MODELO_RESPALDO = process.env.RADIO_MODELO_RESPALDO || "whisper-large-v3-turbo";
 
