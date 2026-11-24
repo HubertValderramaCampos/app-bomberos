@@ -53,7 +53,7 @@ export function evidenciaSelectiva(
 ): Map<string, number> {
   const evidencia = new Map<string, number>();
   // Cualquier compañía (no solo Lima Centro): así también aprende pares de Lima Sur, Norte, Este y Callao
-  const valida = (cia: string) => /^B-d{1,3}$/.test(cia) && !excluir.has(cia);
+  const valida = (cia: string) => /^B-\d{1,3}$/.test(cia) && !excluir.has(cia);
   for (const e of emergencias) {
     const f = Date.parse(e.fecha);
     if (f < T - 120_000 || f > T + 240_000) continue;
